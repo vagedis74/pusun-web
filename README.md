@@ -43,6 +43,9 @@ Web Bluetooth only works in **Chrome or Edge** (desktop or Android) on `https://
 - Courses: Pusun's online training courses with their videos; "Practice in Vary Speed"
   loads the course's drill, like the app's Start button (works without a machine connected)
 - BLE log of every frame sent and received
+- Advanced (off by default, "Show advanced" at the bottom): the app's hidden factory
+  controls. "Read value" sends `71` and shows the two values of the `30` reply; the point
+  editor writes any court point 1–41 with unchecked values, then sends apply
 
 ## Protocol
 
@@ -64,7 +67,7 @@ except several frames the app sends with fixed trailers. Those are reproduced ex
 | `6C` | aim position |
 | `6D` | sequence pages (point ids in play order) |
 
-Notifications: `03` battery, `5E` fault, `30` status (unused).
+Notifications: `03` battery, `5E` fault, `30` two values (shown by Advanced → Read value).
 
 ## Court points
 
@@ -86,4 +89,5 @@ Check these with a real machine:
 
 ## Not ported
 
-- Commands `70` and `71`: hidden factory buttons in the app ("change name", "read value").
+- Command `70`: hidden factory "change name" button. It sends a fixed payload
+  (`03 16 05 0C 01 00`) whose effect is unknown and may rewrite the machine's name/date code.

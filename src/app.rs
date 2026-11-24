@@ -6,7 +6,7 @@ use leptos::task::spawn_local;
 
 use crate::ble::Machine;
 use crate::courses::Courses;
-use crate::protocol::{self as p, AiOptions, CustomPoint, DrillPause, DrillPoint, Frame, Height, Notification, Pattern, PatternDefault, ProgramSettings};
+use crate::protocol::{self as p, AiOptions, CustomPoint, DrillPause, DrillPoint, Frame, Height, Notification, Pattern, PatternDefault, ProgramSettings, RawPoint};
 
 /// A frame and the delay before sending it, mirroring the app's `postDelayed` gaps.
 type Step = (u32, Frame);
@@ -14,6 +14,7 @@ type Step = (u32, Frame);
 const CUSTOM_KEY: &str = "pusun-web.custom-points";
 const ROUTES_KEY: &str = "pusun-web.routes";
 const DEFAULTS_KEY: &str = "pusun-web.pattern-defaults";
+const ADVANCED_KEY: &str = "pusun-web.advanced";
 
 /// Saved per-pattern defaults, keyed like the app (`fix1`, `lr3`, `moon`, ...).
 fn load_defaults() -> Vec<(String, PatternDefault)> {
@@ -318,6 +319,8 @@ pub fn App() -> impl IntoView {
     let editing = RwSignal::new(1u8);
     let defaults = RwSignal::new(load_defaults());
     let notice = RwSignal::new(None::<String>);
+    let advanced = RwSignal::new(storage().and_then(|s| s.get_item(ADVANCED_KEY).ok().flatten()).as_deref() == Some("1"));
+    let status = RwSignal::new(None::<(u8, u8)>);
 
     let on_notify = move |bytes: Vec<u8>| {
         ctx.push_log(format!("RX {}", p::hex(&bytes)));
@@ -329,6 +332,7 @@ pub fn App() -> impl IntoView {
                 }
                 fault.set(Some(f.describe()));
             }
+            Notification::Status(a, b) => status.set(Some((a, b))),
             _ => {}
         }
     };
@@ -941,6 +945,19 @@ pub fn App() -> impl IntoView {
 
         <Courses on_practice=practice_course />
 
+        <label class="toggle">
+            <input type="checkbox" prop:checked=move || advanced.get()
+                on:change=move |ev| {
+                    let on = event_target_checked(&ev);
+                    advanced.set(on);
+                    if let Some(st) = storage() { let _ = st.set_item(ADVANCED_KEY, if on { "1" } else { "0" }); }
+                } />
+            <span>"Show advanced (factory) controls"</span>
+        </label>
+        <Show when=move || advanced.get()>
+            <Advanced ctx=ctx status=status height=height height_level=height_level custom=custom />
+        </Show>
+
         <details>
             <summary>"BLE log"</summary>
             <pre>{move || ctx.log.get().join("\n")}</pre>
@@ -1057,5 +1074,86 @@ fn SavedList(
             <button disabled=move || !can_save.get()
                 on:click=move |_| if let Some(n) = prompt_name(&format!("Name for this {noun}")) { on_save(n.clone()); selected.set(n); }>"Save current"</button>
         </div>
+    }
+}
+
+/// Point as currently uploaded: the height table, or the saved custom point on mid.
+fn current_point(id: u8, height: Height, level: u8, custom: &[CustomPoint; p::CUSTOM_POINTS]) -> RawPoint {
+    let id = id.clamp(1, p::ALL_POINTS);
+    if height == Height::Mid && id > 35 {
+        RawPoint::from_frame(&p::custom_point(id - 35, custom[(id - 36) as usize]))
+    } else {
+        RawPoint::from_frame(&p::calibration(height, level)[(id - 1) as usize])
+    }
+}
+
+/// Hidden factory controls from the app: "read value" (`0x71`) and the raw point editor.
+#[component]
+fn Advanced(
+    ctx: Ctx,
+    status: RwSignal<Option<(u8, u8)>>,
+    height: RwSignal<Height>,
+    height_level: RwSignal<u8>,
+    custom: RwSignal<[CustomPoint; p::CUSTOM_POINTS]>,
+) -> impl IntoView {
+    let connected = move || ctx.name.get().is_some();
+    let point = RwSignal::new(current_point(1, height.get_untracked(), height_level.get_untracked(), &custom.get_untracked()));
+    let load = move |id: u8| point.set(current_point(id, height.get_untracked(), height_level.get_untracked(), &custom.get_untracked()));
+    let read = move |_| {
+        status.set(None);
+        ctx.run(vec![(0, p::read_value())]);
+    };
+    let write = move |_| {
+        let pt = point.get_untracked();
+        ctx.push_log(format!("Point editor: writing point {}", pt.id));
+        ctx.run(vec![(0, pt.frame()), (50, p::apply())]);
+    };
+    let field = move |label: &'static str, max: u32, get: fn(&RawPoint) -> u32, set: fn(&mut RawPoint, u32)| view! {
+        <label class="field">
+            <span>{label}</span>
+            <input type="number" min=0 max=max
+                prop:value=move || get(&point.get()).to_string()
+                on:change=move |ev| {
+                    let v = event_target_value(&ev).trim().parse::<u32>().unwrap_or(0).min(max);
+                    point.update(|pt| set(pt, v));
+                } />
+        </label>
+    };
+    view! {
+        <section class="advanced" class:disabled=move || !connected()>
+            <h2>"Advanced"</h2>
+            <p class="warn">"Hidden factory controls from the official app. They were never shown to users and have not been tested on a machine. Use at your own risk."</p>
+
+            <h3>"Read value"</h3>
+            <div class="row">
+                <button on:click=read>"Read value (0x71)"</button>
+                <span class="value">{move || match status.get() {
+                    Some((a, b)) => format!("va1 = {a}, va2 = {b}"),
+                    None => "No 0x30 reply yet".into(),
+                }}</span>
+            </div>
+
+            <h3>"Point editor"</h3>
+            <p class="hint">"Writes one stored court point with unchecked values, then sends apply. Points 1–35 are rewritten from the height table on reconnect or height change; 36–41 from the custom points."</p>
+            <div class="row">
+                <label class="field">
+                    <span>"Point (1–41)"</span>
+                    <input type="number" min=1 max=p::ALL_POINTS
+                        prop:value=move || point.get().id.to_string()
+                        on:change=move |ev| load(event_target_value(&ev).trim().parse::<u8>().unwrap_or(1).clamp(1, p::ALL_POINTS)) />
+                </label>
+                <button on:click=move |_| load(point.get_untracked().id) title="Reload the values currently uploaded for this point">"Load current"</button>
+            </div>
+            <div class="fields">
+                {field("Left ↔ right", u16::MAX as u32, |pt| pt.lr as u32, |pt, v| pt.lr = v as u16)}
+                {field("Height", u16::MAX as u32, |pt| pt.ud as u32, |pt, v| pt.ud = v as u16)}
+                {field("Speed", u16::MAX as u32, |pt| pt.speed as u32, |pt, v| pt.speed = v as u16)}
+                {field("Interval", u8::MAX as u32, |pt| pt.interval as u32, |pt, v| pt.interval = v as u8)}
+            </div>
+            <p class="hint mono">{move || p::hex(&point.get().frame())}</p>
+            <div class="row">
+                <button class="primary" on:click=write>"Write point"</button>
+            </div>
+        </section>
     }
 }

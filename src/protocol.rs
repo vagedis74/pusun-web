@@ -193,6 +193,44 @@ pub fn custom_point(n: u8, p: CustomPoint) -> Frame {
     point_frame(n.clamp(1, 6) + 35, [p.lr as i16, p.ud as i16, p.speed as i16, p.interval as i16])
 }
 
+/// A court point as stored on the machine (ids 1..=41).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RawPoint {
+    pub id: u8,
+    pub lr: u16,
+    pub ud: u16,
+    pub speed: u16,
+    pub interval: u8,
+}
+
+impl RawPoint {
+    /// Decodes a point frame (`AA id lr lr ud ud spd spd interval A5`).
+    pub fn from_frame(f: &Frame) -> RawPoint {
+        RawPoint {
+            id: f[1],
+            lr: u16::from_be_bytes([f[2], f[3]]),
+            ud: u16::from_be_bytes([f[4], f[5]]),
+            speed: u16::from_be_bytes([f[6], f[7]]),
+            interval: f[8],
+        }
+    }
+
+    /// Hidden factory point editor (`u_dian`): writes any point with unchecked values.
+    /// Only the id is clamped to 1..=41 so the frame cannot collide with a command.
+    pub fn frame(self) -> Frame {
+        let [a, b] = self.lr.to_be_bytes();
+        let [c, d] = self.ud.to_be_bytes();
+        let [e, f] = self.speed.to_be_bytes();
+        frame_raw(self.id.clamp(1, ALL_POINTS), [a, b, c, d, e, f], self.interval)
+    }
+}
+
+/// `0x71`: hidden factory "read value" (读值) button. quirk: trailer 0x01.
+/// The reply is presumably the `0x30` notification, which the app only logs.
+pub fn read_value() -> Frame {
+    frame_raw(0x71, [0; 6], 0x01)
+}
+
 /// `0x6D` pages: up to 28 ids in play order, five per page, six pages.
 pub fn sequence_pages(ids: &[u8]) -> [Frame; 6] {
     let mut s = [0u8; 30];
@@ -682,6 +720,19 @@ mod tests {
         assert_eq!(stop(), [0xAA, 0x6B, 0, 0, 0, 0, 0, 0, 0x6B, 0xA5]);
         assert_eq!(lr_limits(), [0xAA, 100, 8, 0x16, 0, 0xD2, 0, 0, 1, 0xA5]);
         assert_eq!(ud_limits(), [0xAA, 101, 3, 0xE8, 2, 0xBC, 0, 0, 1, 0xA5]);
+        assert_eq!(read_value(), [0xAA, 113, 0, 0, 0, 0, 0, 0, 1, 0xA5]);
+    }
+
+    #[test]
+    fn raw_point_round_trip() {
+        let pt = RawPoint { id: 17, lr: 1140, ud: 2600, speed: 105, interval: 40 };
+        assert_eq!(pt.frame(), [0xAA, 17, 0x04, 0x74, 0x0A, 0x28, 0, 105, 40, 0xA5]);
+        assert_eq!(RawPoint::from_frame(&pt.frame()), pt);
+        for f in calibration(Height::Mid, 10) {
+            assert_eq!(RawPoint::from_frame(&f).frame(), f);
+        }
+        assert_eq!(RawPoint { id: 0, ..pt }.frame()[1], 1);
+        assert_eq!(RawPoint { id: 0x66, ..pt }.frame()[1], 41);
     }
 
     fn sent(p: &Pattern) -> Vec<Frame> {

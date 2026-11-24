@@ -43,3 +43,10 @@ button.dirty { border-color: var(--accent); color: var(--accent); font-weight: 6
 .course-name { font-weight: 600; }
 .course small { opacity: .75; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .course-detail video { width: 100%; max-height: 60vh; background: #000; border-radius: .5rem; }
+.toggle { display: flex; align-items: center; gap: .5rem; margin: 1rem 0 .5rem; }
+.advanced.disabled { opacity: .45; pointer-events: none; }
+.warn { padding: .5rem .7rem; border-radius: .5rem; border: 1px solid #d68a00; font-size: .9rem; }
+.fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: .4rem; }
+.field { margin: .2rem 0; }
+.field input { font: inherit; padding: .4rem; border-radius: .5rem; border: 1px solid var(--line); background: Canvas; color: inherit; width: 100%; box-sizing: border-box; }
+.mono { font-family: ui-monospace, monospace; }
