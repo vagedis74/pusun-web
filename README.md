@@ -18,6 +18,9 @@ The Courses section loads its list from Pusun's API, which sends no CORS headers
 proxies `/pusun-api/*` to it (see `Trunk.toml`); a static host needs the same proxy rule,
 otherwise the section explains why the list cannot load. Videos and images load directly.
 
+Live build: https://vagedis74.github.io/pusun-web/ (deployed by `.github/workflows/pages.yml` on every
+push to `main`; Courses cannot load there because GitHub Pages has no proxy).
+
 Web Bluetooth only works in **Chrome or Edge** (desktop or Android) on `https://` or
 `http://localhost`. Safari and all iOS browsers do not support it. To use a phone, host
 `dist/` on any HTTPS static host.
