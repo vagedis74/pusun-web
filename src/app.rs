@@ -1,0 +1,1061 @@
+use std::rc::Rc;
+
+use gloo_timers::future::TimeoutFuture;
+use leptos::prelude::*;
+use leptos::task::spawn_local;
+
+use crate::ble::Machine;
+use crate::courses::Courses;
+use crate::protocol::{self as p, AiOptions, CustomPoint, DrillPause, DrillPoint, Frame, Height, Notification, Pattern, PatternDefault, ProgramSettings};
+
+/// A frame and the delay before sending it, mirroring the app's `postDelayed` gaps.
+type Step = (u32, Frame);
+
+const CUSTOM_KEY: &str = "pusun-web.custom-points";
+const ROUTES_KEY: &str = "pusun-web.routes";
+const DEFAULTS_KEY: &str = "pusun-web.pattern-defaults";
+
+/// Saved per-pattern defaults, keyed like the app (`fix1`, `lr3`, `moon`, ...).
+fn load_defaults() -> Vec<(String, PatternDefault)> {
+    let Some(s) = storage().and_then(|s| s.get_item(DEFAULTS_KEY).ok().flatten()) else { return Vec::new() };
+    s.lines()
+        .filter_map(|line| {
+            let (key, vals) = line.split_once('=')?;
+            let v: Vec<i32> = vals.split(',').filter_map(|x| x.parse().ok()).collect();
+            let [lr, ud, freq, speed, spin, level] = v[..] else { return None };
+            Some((
+                key.to_string(),
+                PatternDefault {
+                    lr: (lr as u16).clamp(p::LR_MIN, p::LR_MAX),
+                    ud: (ud as u16).min(p::UD_MAX),
+                    freq: (freq as u8).clamp(1, 10),
+                    speed: (speed as u8).clamp(1, 13),
+                    spin: (spin as i8).clamp(-p::SPIN_MAX, p::SPIN_MAX),
+                    height_level: if level == 0 { 0 } else { (level as u8).clamp(p::HEIGHT_LEVEL_MIN, p::HEIGHT_LEVEL_MAX) },
+                },
+            ))
+        })
+        .collect()
+}
+
+fn save_defaults(d: &[(String, PatternDefault)]) {
+    let s = d
+        .iter()
+        .map(|(k, v)| format!("{k}={},{},{},{},{},{}", v.lr, v.ud, v.freq, v.speed, v.spin, v.height_level))
+        .collect::<Vec<_>>()
+        .join("\n");
+    if let Some(st) = storage() {
+        let _ = st.set_item(DEFAULTS_KEY, &s);
+    }
+}
+
+/// A saved Vary Speed drill: name, point order, pause and each shot's point parameters.
+#[derive(Clone, Debug, PartialEq)]
+struct Route {
+    name: String,
+    points: Vec<u8>,
+    pause: DrillPause,
+    params: Vec<(u8, DrillPoint)>,
+}
+
+fn pause_code(p: DrillPause) -> u8 {
+    match p {
+        DrillPause::None => 0,
+        DrillPause::Short => 1,
+        DrillPause::Long => 2,
+    }
+}
+
+fn pause_from(c: &str) -> DrillPause {
+    match c {
+        "1" | "short" => DrillPause::Short,
+        "2" | "long" => DrillPause::Long,
+        _ => DrillPause::None,
+    }
+}
+
+const PROGRAMS_KEY: &str = "pusun-web.programs";
+const CUSTOM_SETS_KEY: &str = "pusun-web.custom-sets";
+
+/// Named records stored one per line as `name<TAB>fields`.
+fn load_named(key: &str) -> Vec<(String, String)> {
+    let Some(s) = storage().and_then(|s| s.get_item(key).ok().flatten()) else { return Vec::new() };
+    s.lines().filter_map(|l| l.split_once('\t')).map(|(n, v)| (n.to_string(), v.to_string())).collect()
+}
+
+fn save_named(key: &str, items: impl Iterator<Item = (String, String)>) {
+    let s = items.map(|(n, v)| format!("{n}\t{v}")).collect::<Vec<_>>().join("\n");
+    if let Some(st) = storage() {
+        let _ = st.set_item(key, &s);
+    }
+}
+
+fn nums<T: std::str::FromStr>(s: &str) -> Vec<T> {
+    s.split(',').filter_map(|x| x.trim().parse().ok()).collect()
+}
+
+fn join<T: ToString>(v: &[T]) -> String {
+    v.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(",")
+}
+
+fn load_routes() -> Vec<Route> {
+    load_named(ROUTES_KEY)
+        .into_iter()
+        .filter_map(|(name, v)| {
+            let f: Vec<&str> = v.split('\t').collect();
+            let [pts, pause, params] = f[..] else { return None };
+            let points = nums::<u8>(pts).into_iter().filter(|x| (1..=28).contains(x)).collect();
+            let params = params
+                .split(';')
+                .filter_map(|r| {
+                    let [lr, ud, speed, interval, spin, id] = nums::<u16>(r)[..] else { return None };
+                    (1..=28).contains(&id).then(|| {
+                        (id as u8, DrillPoint { lr, ud, speed: speed as u8, interval: interval as u8, spin: spin as u8 }.clamped())
+                    })
+                })
+                .collect();
+            Some(Route { name, points, pause: pause_from(pause), params })
+        })
+        .collect()
+}
+
+fn save_routes(routes: &[Route]) {
+    save_named(
+        ROUTES_KEY,
+        routes.iter().map(|r| {
+            let params = r
+                .params
+                .iter()
+                .map(|(id, d)| format!("{},{},{},{},{},{id}", d.lr, d.ud, d.speed, d.interval, d.spin))
+                .collect::<Vec<_>>()
+                .join(";");
+            (r.name.clone(), format!("{}\t{}\t{params}", join(&r.points), pause_code(r.pause)))
+        }),
+    );
+}
+
+/// A named Program-panel program (`SeleDao`).
+#[derive(Clone, Debug, PartialEq)]
+struct SavedProgram {
+    name: String,
+    points: Vec<u8>,
+    settings: ProgramSettings,
+}
+
+fn height_code(h: Height) -> u8 {
+    match h {
+        Height::Low => 0,
+        Height::Mid => 1,
+        Height::High => 2,
+    }
+}
+
+fn load_programs() -> Vec<SavedProgram> {
+    load_named(PROGRAMS_KEY)
+        .into_iter()
+        .filter_map(|(name, v)| {
+            let (pts, rest) = v.split_once('\t')?;
+            let [freq, height, level, speed, spin] = nums::<i32>(rest)[..] else { return None };
+            Some(SavedProgram {
+                name,
+                points: nums::<u8>(pts).into_iter().filter(|x| (1..=p::ALL_POINTS).contains(x)).take(p::MAX_SEQUENCE).collect(),
+                settings: ProgramSettings {
+                    freq: (freq as u8).clamp(1, 10),
+                    speed: (speed as u8).clamp(1, 13),
+                    spin: (spin as i8).clamp(-p::SPIN_MAX, p::SPIN_MAX),
+                    height: match height { 0 => Height::Low, 2 => Height::High, _ => Height::Mid },
+                    height_level: if level == 0 { 0 } else { (level as u8).clamp(p::HEIGHT_LEVEL_MIN, p::HEIGHT_LEVEL_MAX) },
+                },
+            })
+        })
+        .collect()
+}
+
+fn save_programs(list: &[SavedProgram]) {
+    save_named(
+        PROGRAMS_KEY,
+        list.iter().map(|x| {
+            let s = x.settings;
+            (x.name.clone(), format!("{}\t{},{},{},{},{}", join(&x.points), s.freq, height_code(s.height), s.height_level, s.speed, s.spin))
+        }),
+    );
+}
+
+/// A named custom-point set (`VariDao`): play order and all six points.
+#[derive(Clone, Debug, PartialEq)]
+struct CustomSet {
+    name: String,
+    order: Vec<u8>,
+    points: [CustomPoint; p::CUSTOM_POINTS],
+}
+
+fn load_custom_sets() -> Vec<CustomSet> {
+    load_named(CUSTOM_SETS_KEY)
+        .into_iter()
+        .filter_map(|(name, v)| {
+            let (order, rest) = v.split_once('\t')?;
+            let mut points = CustomPoint::defaults();
+            for (i, row) in rest.split(';').take(p::CUSTOM_POINTS).enumerate() {
+                let [lr, ud, speed, interval] = nums::<u16>(row)[..] else { return None };
+                points[i] = CustomPoint { lr, ud, speed, interval: interval as u8 }.clamped();
+            }
+            let order = nums::<u8>(order).into_iter().filter(|x| (1..=6).contains(x)).take(p::MAX_SEQUENCE).collect();
+            Some(CustomSet { name, order, points })
+        })
+        .collect()
+}
+
+fn save_custom_sets(list: &[CustomSet]) {
+    save_named(
+        CUSTOM_SETS_KEY,
+        list.iter().map(|x| {
+            let pts = x.points.iter().map(|c| format!("{},{},{},{}", c.lr, c.ud, c.speed, c.interval)).collect::<Vec<_>>().join(";");
+            (x.name.clone(), format!("{}\t{pts}", join(&x.order)))
+        }),
+    );
+}
+
+/// Asks for a name; tabs and newlines are replaced because they separate stored fields.
+fn prompt_name(label: &str) -> Option<String> {
+    let name = web_sys::window()?.prompt_with_message(label).ok()??;
+    let name = name.trim().replace(['\t', '\n', '\r'], " ");
+    (!name.is_empty()).then_some(name)
+}
+
+
+#[derive(Clone, Copy)]
+struct Ctx {
+    machine: StoredValue<Option<Rc<Machine>>, LocalStorage>,
+    name: RwSignal<Option<String>>,
+    log: RwSignal<Vec<String>>,
+    error: RwSignal<Option<String>>,
+}
+
+impl Ctx {
+    fn push_log(&self, line: String) {
+        self.log.update(|l| {
+            l.push(line);
+            let n = l.len();
+            if n > 300 {
+                l.drain(..n - 300);
+            }
+        });
+    }
+
+    /// Sends steps in order in the background. Does nothing while disconnected.
+    fn run(&self, steps: Vec<Step>) {
+        let Some(m) = self.machine.get_value() else { return };
+        let ctx = *self;
+        spawn_local(async move {
+            for (delay, f) in steps {
+                if delay > 0 {
+                    TimeoutFuture::new(delay).await;
+                }
+                ctx.push_log(format!("TX {}", p::hex(&f)));
+                if let Err(e) = m.send(&f).await {
+                    ctx.error.set(Some(format!("Write failed: {e}")));
+                    return;
+                }
+            }
+        });
+    }
+}
+
+fn storage() -> Option<web_sys::Storage> {
+    web_sys::window()?.local_storage().ok().flatten()
+}
+
+fn load_custom() -> [CustomPoint; p::CUSTOM_POINTS] {
+    let mut pts = CustomPoint::defaults();
+    if let Some(s) = storage().and_then(|s| s.get_item(CUSTOM_KEY).ok().flatten()) {
+        for (i, row) in s.split(';').take(p::CUSTOM_POINTS).enumerate() {
+            let v: Vec<u16> = row.split(',').filter_map(|x| x.parse().ok()).collect();
+            if let [lr, ud, speed, interval] = v[..] {
+                pts[i] = CustomPoint { lr, ud, speed, interval: interval as u8 }.clamped();
+            }
+        }
+    }
+    pts
+}
+
+fn save_custom(pts: &[CustomPoint; p::CUSTOM_POINTS]) {
+    let s = pts.iter().map(|c| format!("{},{},{},{}", c.lr, c.ud, c.speed, c.interval)).collect::<Vec<_>>().join(";");
+    if let Some(st) = storage() {
+        let _ = st.set_item(CUSTOM_KEY, &s);
+    }
+}
+
+/// Gap between calibration rows, as in `sendBaseData`.
+fn table_steps(frames: Vec<Frame>, first_delay: u32) -> Vec<Step> {
+    frames.into_iter().enumerate().map(|(i, f)| (if i == 0 { first_delay } else { 10 }, f)).collect()
+}
+
+#[component]
+pub fn App() -> impl IntoView {
+    let ctx = Ctx {
+        machine: StoredValue::new_local(None),
+        name: RwSignal::new(None),
+        log: RwSignal::new(Vec::new()),
+        error: RwSignal::new(None),
+    };
+    let battery = RwSignal::new(None::<u8>);
+    let fault = RwSignal::new(None::<String>);
+    let running = RwSignal::new(false);
+    let connecting = RwSignal::new(false);
+
+    let speed = RwSignal::new(5u8);
+    let freq = RwSignal::new(5u8);
+    let spin = RwSignal::new(0i8);
+    let lr = RwSignal::new(1140u16);
+    let ud = RwSignal::new(1500u16);
+    let height = RwSignal::new(Height::Mid);
+    let height_level = RwSignal::new(p::HEIGHT_LEVEL_DEFAULT);
+
+    let pattern = RwSignal::new(Pattern::Fixed(1));
+    let program = RwSignal::new(Vec::<u8>::new());
+    let custom_seq = RwSignal::new(Vec::<u8>::new());
+    let custom = RwSignal::new(load_custom());
+    let editing = RwSignal::new(1u8);
+    let defaults = RwSignal::new(load_defaults());
+    let notice = RwSignal::new(None::<String>);
+
+    let on_notify = move |bytes: Vec<u8>| {
+        ctx.push_log(format!("RX {}", p::hex(&bytes)));
+        match p::parse_notification(&bytes) {
+            Notification::Battery(v) => battery.set(Some(v)),
+            Notification::Fault(f) => {
+                if f == p::Fault::OutOfBalls {
+                    running.set(false);
+                }
+                fault.set(Some(f.describe()));
+            }
+            _ => {}
+        }
+    };
+
+    // Court table for the current height setting, plus the saved custom points.
+    let table_upload = move |first_delay: u32| {
+        let mut steps = table_steps(p::calibration(height.get_untracked(), height_level.get_untracked()), first_delay);
+        if height.get_untracked() == Height::Mid {
+            steps.extend(custom.get_untracked().iter().enumerate().map(|(i, c)| (10, p::custom_point(i as u8 + 1, *c))));
+        }
+        steps
+    };
+
+    let connect = move |_| {
+        connecting.set(true);
+        ctx.error.set(None);
+        spawn_local(async move {
+            let on_disconnect = move || {
+                ctx.machine.set_value(None);
+                ctx.name.set(None);
+                running.set(false);
+                ctx.push_log("Disconnected".into());
+            };
+            match Machine::connect(on_notify, on_disconnect).await {
+                Ok(m) => {
+                    let name = m.name.clone();
+                    ctx.push_log(format!("Connected to {name}"));
+                    if !(name.starts_with("PT7") || name.starts_with("PT8")) {
+                        ctx.error.set(Some(format!(
+                            "{name} is not a PT7/PT8 device. This protocol was decoded for PT7/PT8; other models may react differently."
+                        )));
+                    }
+                    ctx.machine.set_value(Some(m));
+                    ctx.name.set(Some(name));
+                    // Same order and timing as the app's onConnectSuccess.
+                    let mut steps = table_upload(1500);
+                    steps.extend([
+                        (300, p::speed(speed.get_untracked())),
+                        (150, p::frequency(freq.get_untracked())),
+                        (50, p::lr_limits()),
+                        (50, p::ud_limits()),
+                        (50, p::apply()),
+                        (100, p::battery_query()),
+                    ]);
+                    ctx.run(steps);
+                }
+                Err(e) => ctx.error.set(Some(e)),
+            }
+            connecting.set(false);
+        });
+    };
+
+    let disconnect = move |_| {
+        if let Some(m) = ctx.machine.get_value() {
+            m.disconnect();
+        }
+    };
+
+    let send_speed = move || ctx.run(vec![(0, p::speed(speed.get_untracked())), (50, p::apply())]);
+    let send_freq = move || ctx.run(vec![(0, p::frequency(freq.get_untracked())), (50, p::apply())]);
+    let send_spin = move || {
+        let s = spin.get_untracked();
+        let mut steps = Vec::new();
+        // The app raises speed to level 5 before applying any spin.
+        if s != 0 && speed.get_untracked() < 5 {
+            speed.set(5);
+            steps.push((0, p::speed(5)));
+        }
+        if s == 0 {
+            steps.extend([(0, p::spin(0)), (50, p::apply())]);
+        } else {
+            steps.extend([(50, p::apply()), (50, p::spin(s))]);
+        }
+        ctx.run(steps);
+    };
+    // The app caps height at 2000 in fixed-point and horizontal patterns.
+    let ud_cap = move || match pattern.get() {
+        Pattern::Fixed(_) | Pattern::Horizontal(_) => p::UD_MAX_LOW_MODES,
+        _ => p::UD_MAX,
+    };
+    let position_frame = move || {
+        let pat = pattern.get_untracked();
+        let x = if matches!(pat, Pattern::Horizontal(_)) { 0 } else { lr.get_untracked() };
+        let cap = if matches!(pat, Pattern::Fixed(_) | Pattern::Horizontal(_)) { p::UD_MAX_LOW_MODES } else { p::UD_MAX };
+        let y = if matches!(pat, Pattern::Vertical(_)) { 0 } else { ud.get_untracked().min(cap) };
+        p::position(x, y)
+    };
+    let send_position = move || ctx.run(vec![(0, position_frame()), (50, p::apply())]);
+
+    let current_pattern = move || match pattern.get_untracked() {
+        Pattern::Program(_) => Pattern::Program(program.get_untracked()),
+        Pattern::Custom(_) => Pattern::Custom(custom_seq.get_untracked()),
+        other => other,
+    };
+
+    let start = move || {
+        let pat = current_pattern();
+        if !pat.is_ready() {
+            ctx.error.set(Some("Select at least one point first.".into()));
+            return;
+        }
+        fault.set(None);
+        running.set(true);
+        ctx.run(pat.start());
+    };
+    let stop = move || {
+        running.set(false);
+        ctx.run(p::stop_sequence());
+    };
+
+    // Selecting a pattern applies its preset like the app does, and restarts if running.
+    let select = move |pat: Pattern| {
+        pattern.set(pat.clone());
+        let pre = pat.preset();
+        let mut steps: Vec<Step> = Vec::new();
+        if let Some((x, y)) = pre.aim {
+            lr.set(x);
+            ud.set(y);
+        }
+        if pre.aim.is_some() || matches!(pat, Pattern::Horizontal(_) | Pattern::Vertical(_)) {
+            steps.push((0, position_frame()));
+        }
+        if let Some(s) = pre.speed {
+            speed.set(s);
+            steps.push((50, p::speed(s)));
+        }
+        if let Some((threshold, level)) = pre.speed_max {
+            if speed.get_untracked() > threshold {
+                speed.set(level);
+                steps.push((50, p::speed(level)));
+            }
+        }
+        if let Some((level, f)) = pre.spin {
+            spin.set(level);
+            steps.push((50, f));
+        }
+        // A saved default for this pattern overrides the preset, as in setDefaultMode.
+        let saved = pat.default_key().and_then(|k| defaults.get_untracked().into_iter().find(|(key, _)| *key == k));
+        if let Some((_, d)) = saved {
+            lr.set(d.lr);
+            ud.set(d.ud);
+            freq.set(d.freq);
+            speed.set(d.speed);
+            spin.set(d.spin);
+            if d.height_level != 0 {
+                height.set(Height::Mid);
+                height_level.set(d.height_level);
+            }
+            steps.extend(d.apply_steps());
+        }
+        notice.set(None);
+        steps.push((50, p::apply()));
+        if running.get_untracked() && pat.is_ready() {
+            steps.extend(current_pattern().start());
+        }
+        ctx.run(steps);
+    };
+
+    let current_default = move || PatternDefault {
+        lr: lr.get(),
+        ud: ud.get(),
+        freq: freq.get(),
+        speed: speed.get(),
+        spin: spin.get(),
+        height_level: height_level.get(),
+    };
+    let saved_default = move || {
+        let key = pattern.get().default_key()?;
+        defaults.get().into_iter().find(|(k, _)| *k == key).map(|(_, d)| d)
+    };
+    // Like the app's SaveDefault button: highlighted when there is something new to save.
+    let default_dirty = move || match saved_default() {
+        Some(d) => d.differs(&pattern.get(), &current_default()),
+        None => true,
+    };
+    let save_default = move |_| {
+        let Some(key) = pattern.get_untracked().default_key() else { return };
+        if !default_dirty() {
+            notice.set(Some("No change for default value.".into()));
+            return;
+        }
+        let cur = current_default();
+        defaults.update(|d| {
+            d.retain(|(k, _)| *k != key);
+            d.push((key, cur));
+            save_defaults(d);
+        });
+        notice.set(Some("Current values have been saved as default.".into()));
+    };
+    let forget_default = move |_| {
+        let Some(key) = pattern.get_untracked().default_key() else { return };
+        defaults.update(|d| {
+            d.retain(|(k, _)| *k != key);
+            save_defaults(d);
+        });
+        notice.set(Some("Default removed; the pattern's built-in preset applies next time.".into()));
+    };
+
+    let set_height = move |h: Height| {
+        height.set(h);
+        ctx.run(table_upload(0));
+    };
+    let change_level = move |delta: i8| {
+        let lvl = (height_level.get_untracked() as i8 + delta).clamp(p::HEIGHT_LEVEL_MIN as i8, p::HEIGHT_LEVEL_MAX as i8) as u8;
+        if lvl == height_level.get_untracked() {
+            return;
+        }
+        height_level.set(lvl);
+        let mut steps = vec![(5, p::apply())];
+        steps.extend(table_upload(45));
+        ctx.run(steps);
+    };
+
+    let edit_custom = move |f: &dyn Fn(&mut CustomPoint)| {
+        let n = editing.get_untracked();
+        custom.update(|c| {
+            let pt = &mut c[(n - 1) as usize];
+            f(pt);
+            *pt = pt.clamped();
+        });
+        let pts = custom.get_untracked();
+        save_custom(&pts);
+        ctx.run(vec![(0, p::custom_point(n, pts[(n - 1) as usize])), (50, p::apply())]);
+    };
+
+    // Vary Speed drills.
+    let drill = RwSignal::new(Vec::<u8>::new());
+    let pause = RwSignal::new(DrillPause::None);
+    let drill_params = RwSignal::new(DrillPoint::defaults());
+    let routes = RwSignal::new(load_routes());
+    let ai = RwSignal::new(AiOptions { left: true, level: 1, balls: 3 });
+    let date = move || ctx.name.get_untracked().as_deref().and_then(p::date_code);
+
+    let start_drill = move |_| {
+        let pts = drill.get_untracked();
+        if pts.is_empty() {
+            return;
+        }
+        fault.set(None);
+        running.set(true);
+        let frames = p::drill(&pts, &drill_params.get_untracked(), pause.get_untracked(), date());
+        ctx.run(frames.into_iter().map(|f| (50, f)).collect());
+    };
+    // Editing a shot changes its point and is sent to the machine straight away, like the app.
+    let edit_shot = move |position: usize, f: &dyn Fn(&mut DrillPoint)| {
+        let pts = drill.get_untracked();
+        let Some(&id) = pts.get(position) else { return };
+        drill_params.update(|d| {
+            let pt = &mut d[(id - 1) as usize];
+            f(pt);
+            *pt = pt.clamped();
+        });
+        let pt = drill_params.get_untracked()[(id - 1) as usize];
+        let last = position + 1 == pts.len();
+        ctx.run(p::drill_edit(position as u8 + 1, pt, last, pause.get_untracked(), date()));
+    };
+    let generate = move |_| {
+        let mut params = drill_params.get_untracked();
+        let pts = p::ai_drill(ai.get_untracked(), &mut params, |n| (js_sys::Math::random() * n as f64) as usize % n);
+        drill_params.set(params);
+        drill.set(pts);
+    };
+    let save_route = move |name: String| {
+        let pts = drill.get_untracked();
+        let params = drill_params.get_untracked();
+        let route = Route {
+            name: name.clone(),
+            points: pts.clone(),
+            pause: pause.get_untracked(),
+            params: pts.iter().map(|&id| (id, params[(id - 1) as usize])).collect(),
+        };
+        routes.update(|r| {
+            r.retain(|x| x.name != name);
+            r.push(route);
+            save_routes(r);
+        });
+    };
+    let load_route = move |name: String| {
+        let Some(r) = routes.get_untracked().into_iter().find(|r| r.name == name) else { return };
+        drill_params.update(|d| {
+            for (id, pt) in &r.params {
+                d[(*id - 1) as usize] = *pt;
+            }
+        });
+        pause.set(r.pause);
+        drill.set(r.points);
+    };
+    let delete_route = move |name: String| {
+        routes.update(|r| {
+            r.retain(|x| x.name != name);
+            save_routes(r);
+        });
+    };
+    let route_names = Signal::derive(move || routes.get().into_iter().map(|r| r.name).collect::<Vec<_>>());
+
+    // Named programs and custom-point sets.
+    let programs = RwSignal::new(load_programs());
+    let custom_sets = RwSignal::new(load_custom_sets());
+    let save_program = move |name: String| {
+        let entry = SavedProgram {
+            name: name.clone(),
+            points: program.get_untracked(),
+            settings: ProgramSettings {
+                freq: freq.get_untracked(),
+                speed: speed.get_untracked(),
+                spin: spin.get_untracked(),
+                height: height.get_untracked(),
+                height_level: height_level.get_untracked(),
+            },
+        };
+        programs.update(|l| {
+            l.retain(|x| x.name != name);
+            l.push(entry);
+            save_programs(l);
+        });
+    };
+    let load_program = move |name: String| {
+        let Some(x) = programs.get_untracked().into_iter().find(|x| x.name == name) else { return };
+        let s = x.settings;
+        program.set(x.points);
+        freq.set(s.freq);
+        speed.set(s.speed);
+        spin.set(s.spin);
+        // The app always loads the mid table here, whatever was saved.
+        height.set(Height::Mid);
+        if s.height_level != 0 {
+            height_level.set(s.height_level);
+        }
+        ctx.run(s.load_steps(height_level.get_untracked()));
+    };
+    let delete_program = move |name: String| {
+        programs.update(|l| {
+            l.retain(|x| x.name != name);
+            save_programs(l);
+        });
+    };
+    let save_custom_set = move |name: String| {
+        let entry = CustomSet { name: name.clone(), order: custom_seq.get_untracked(), points: custom.get_untracked() };
+        custom_sets.update(|l| {
+            l.retain(|x| x.name != name);
+            l.push(entry);
+            save_custom_sets(l);
+        });
+    };
+    let load_custom_set = move |name: String| {
+        let Some(x) = custom_sets.get_untracked().into_iter().find(|x| x.name == name) else { return };
+        custom_seq.set(x.order);
+        custom.set(x.points);
+        save_custom(&x.points);
+        ctx.run(p::custom_set_load_steps(&x.points));
+    };
+    let delete_custom_set = move |name: String| {
+        custom_sets.update(|l| {
+            l.retain(|x| x.name != name);
+            save_custom_sets(l);
+        });
+    };
+    let program_names = Signal::derive(move || programs.get().into_iter().map(|x| x.name).collect::<Vec<_>>());
+    let custom_set_names = Signal::derive(move || custom_sets.get().into_iter().map(|x| x.name).collect::<Vec<_>>());
+
+    // A course's Start opens Vary Speed with its points; the screen resets every interval.
+    let practice_course = move |points: Vec<u8>| {
+        drill_params.update(|d| d.iter_mut().for_each(|p| p.interval = p::DRILL_INTERVAL_DEFAULT));
+        pause.set(DrillPause::None);
+        drill.set(points);
+        if let Some(el) = document().get_element_by_id("vary-speed") {
+            el.scroll_into_view();
+        }
+    };
+
+    let connected = move || ctx.name.get().is_some();
+    let is_program = move || matches!(pattern.get(), Pattern::Program(_));
+    let is_custom = move || matches!(pattern.get(), Pattern::Custom(_));
+
+    view! {
+        <header>
+            <h1>"PT-9001 control"</h1>
+            <Show
+                when=connected
+                fallback=move || view! {
+                    <button class="primary" on:click=connect disabled=move || connecting.get()>
+                        {move || if connecting.get() { "Connecting…" } else { "Connect machine" }}
+                    </button>
+                }
+            >
+                <span class="device">{move || ctx.name.get()}</span>
+                <span class="battery">
+                    {move || match battery.get() {
+                        Some(v) => format!("Battery {} ({v})", "▮".repeat(p::battery_bars(v) as usize) + &"▯".repeat(4 - p::battery_bars(v) as usize)),
+                        None => "Battery –".into(),
+                    }}
+                </span>
+                <button on:click=move |_| ctx.run(vec![(0, p::battery_query())])>"↻"</button>
+                <button on:click=disconnect>"Disconnect"</button>
+            </Show>
+        </header>
+
+        <Show when=move || ctx.error.get().is_some()>
+            <p class="error">{move || ctx.error.get()} " " <button on:click=move |_| ctx.error.set(None)>"Dismiss"</button></p>
+        </Show>
+        <Show when=move || fault.get().is_some()>
+            <p class="fault">{move || fault.get()} " " <button on:click=move |_| fault.set(None)>"Dismiss"</button></p>
+        </Show>
+
+        <main class:disabled=move || !connected()>
+            <section class="sticky">
+                <div class="run">
+                    <span class="current">{move || pattern.get().name()}</span>
+                    <Show when=move || pattern.get().default_key().is_some()>
+                        <button class:dirty=default_dirty on:click=save_default
+                            title="Save the current aim, speed, frequency, spin and height as this pattern's default">"Save default"</button>
+                        <Show when=move || saved_default().is_some()>
+                            <button on:click=forget_default title="Remove this pattern's saved default">"✕"</button>
+                        </Show>
+                    </Show>
+                    <button class="primary" on:click=move |_| start() disabled=move || running.get()>"Start"</button>
+                    <button class="stop" on:click=move |_| stop()>"Stop"</button>
+                </div>
+                <Show when=move || notice.get().is_some()>
+                    <p class="hint">{move || notice.get()}</p>
+                </Show>
+            </section>
+
+            <section>
+                <h2>"Shot"</h2>
+                <Slider label="Speed" min=1 max=13 value=speed on_commit=send_speed />
+                <Slider label="Frequency" min=1 max=10 value=freq on_commit=send_freq />
+                <Slider label="Spin (− back / + top)" min=-6 max=6 value=spin on_commit=send_spin />
+                <label>
+                    <span>"Aim " {move || {
+                        let v = lr.get();
+                        if v > 1140 { "left" } else if v < 1140 { "right" } else { "center" }
+                    }} " (" {move || lr.get()} ")"</span>
+                    <input type="range" min=p::LR_MIN max=p::LR_MAX step="10"
+                        prop:value=move || p::LR_MAX + p::LR_MIN - lr.get()
+                        on:input=move |ev| lr.set(p::LR_MAX + p::LR_MIN - event_target_value(&ev).parse().unwrap_or(1140))
+                        on:change=move |_| send_position() />
+                </label>
+                <label>
+                    <span>"Height " {move || ud.get().min(ud_cap())}</span>
+                    <input type="range" min="0" max=move || ud_cap() step="100"
+                        prop:value=move || ud.get().min(ud_cap())
+                        on:input=move |ev| ud.set(event_target_value(&ev).parse().unwrap_or(0))
+                        on:change=move |_| send_position() />
+                </label>
+                <div class="row">
+                    <span>"Court height"</span>
+                    {[(Height::Low, "Low"), (Height::Mid, "Mid"), (Height::High, "High")].into_iter().map(|(h, l)| view! {
+                        <button class="mode" class:selected=move || height.get() == h on:click=move |_| set_height(h)>{l}</button>
+                    }).collect_view()}
+                    <Show when=move || height.get() == Height::Mid>
+                        <button on:click=move |_| change_level(-1)>"−"</button>
+                        <span class="value">{move || height_level.get()}</span>
+                        <button on:click=move |_| change_level(1)>"+"</button>
+                    </Show>
+                </div>
+            </section>
+
+            <section>
+                <h2>"Patterns"</h2>
+                <PatternGroup title="Basics" pattern=pattern select=select options=vec![
+                    Pattern::Fixed(1), Pattern::Fixed(2), Pattern::Fixed(3), Pattern::Random,
+                    Pattern::Primary, Pattern::Smash, Pattern::Moon,
+                    Pattern::Volley(1), Pattern::Volley(2), Pattern::Volley(3),
+                ] />
+                <PatternGroup title="Horizontal" pattern=pattern select=select options=(1..=5).map(Pattern::Horizontal).collect() />
+                <PatternGroup title="Vertical" pattern=pattern select=select options=(1..=3).map(Pattern::Vertical).collect() />
+                <PatternGroup title="Crosscourt" pattern=pattern select=select options=(1..=6).map(Pattern::Cross).collect() />
+                <PatternGroup title="Your own" pattern=pattern select=select options=vec![Pattern::Program(vec![]), Pattern::Custom(vec![])] />
+
+                <Show when=is_program>
+                    <p class="hint">"Tap court points in play order (max " {p::MAX_SEQUENCE} "). Far side is at the top. 36–41 are your custom points."</p>
+                    <div class="court">
+                        {(0..5u8).rev().map(|row| view! {
+                            <div class="court-row">
+                                {(1..=7u8).map(|col| view! { <PointButton id=row * 7 + col list=program max=p::MAX_SEQUENCE /> }).collect_view()}
+                            </div>
+                        }).collect_view()}
+                        <div class="court-row custom-row">
+                            {(36..=41u8).map(|id| view! { <PointButton id=id list=program max=p::MAX_SEQUENCE /> }).collect_view()}
+                        </div>
+                    </div>
+                    <div class="run">
+                        <button on:click=move |_| program.update(|d| { d.pop(); })>"Undo"</button>
+                        <button on:click=move |_| program.set(Vec::new())>"Clear"</button>
+                    </div>
+                    <SavedList title="Saved programs" noun="program" names=program_names can_save=Signal::derive(move || !program.get().is_empty())
+                        on_load=load_program on_delete=delete_program on_save=save_program />
+                </Show>
+
+                <Show when=is_custom>
+                    <p class="hint">"Edit a point (changes are sent to the machine and saved in this browser), then tap points in play order."</p>
+                    <div class="row">
+                        {(1..=6u8).map(|n| view! {
+                            <button class="mode" class:selected=move || editing.get() == n on:click=move |_| editing.set(n)>{format!("Point {n}")}</button>
+                        }).collect_view()}
+                    </div>
+                    {move || {
+                        let n = editing.get();
+                        let c = custom.get()[(n - 1) as usize];
+                        view! {
+                            <div class="editor">
+                                <Stepper label="Left ↔ right" value=c.lr.to_string() dec_label="◀" inc_label="▶"
+                                    dec=move || edit_custom(&|c| c.lr = c.lr.saturating_add(30))
+                                    inc=move || edit_custom(&|c| c.lr = c.lr.saturating_sub(30)) />
+                                <Stepper label="Height" value=c.ud.to_string()
+                                    dec=move || edit_custom(&|c| c.ud = c.ud.saturating_sub(100))
+                                    inc=move || edit_custom(&|c| c.ud = c.ud.saturating_add(100)) />
+                                <Stepper label="Speed" value=(c.speed as i32 - 30).to_string()
+                                    dec=move || edit_custom(&|c| c.speed = c.speed.saturating_sub(5))
+                                    inc=move || edit_custom(&|c| c.speed += 5) />
+                                <Stepper label="Interval" value=format!("{:.1}", c.interval as f32 / 10.0)
+                                    dec=move || edit_custom(&|c| c.interval = c.interval.saturating_sub(5))
+                                    inc=move || edit_custom(&|c| c.interval += 5) />
+                            </div>
+                        }
+                    }}
+                    <div class="row">
+                        <span>"Play order:"</span>
+                        {(1..=6u8).map(|id| view! { <PointButton id=id list=custom_seq max=p::MAX_SEQUENCE /> }).collect_view()}
+                    </div>
+                    <div class="run">
+                        <button on:click=move |_| custom_seq.update(|d| { d.pop(); })>"Undo"</button>
+                        <button on:click=move |_| custom_seq.set(Vec::new())>"Clear"</button>
+                        <button on:click=move |_| {
+                            let d = CustomPoint::defaults();
+                            custom.set(d);
+                            save_custom(&d);
+                            ctx.run(d.iter().enumerate().map(|(i, c)| (10, p::custom_point(i as u8 + 1, *c))).chain([(50, p::apply())]).collect());
+                        }>"Reset points"</button>
+                    </div>
+                    <SavedList title="Saved point sets" noun="point set" names=custom_set_names can_save=Signal::derive(|| true)
+                        on_load=load_custom_set on_delete=delete_custom_set on_save=save_custom_set />
+                </Show>
+            </section>
+
+            <section id="vary-speed">
+                <h2>"Vary Speed"</h2>
+                <p class="hint">"Tap targets in play order (max " {p::MAX_DRILL_SHOTS} "), far side at the top. Each shot can be tuned below; settings belong to the point, so a repeated point plays the same."</p>
+                <div class="court">
+                    {(0..4u8).rev().map(|row| view! {
+                        <div class="court-row">
+                            {(1..=7u8).map(|col| view! { <PointButton id=row * 7 + col list=drill max=p::MAX_DRILL_SHOTS /> }).collect_view()}
+                        </div>
+                    }).collect_view()}
+                </div>
+                <div class="run">
+                    <select prop:value=move || match pause.get() { DrillPause::None => "none", DrillPause::Short => "short", DrillPause::Long => "long" }
+                        on:change=move |ev| pause.set(pause_from(&event_target_value(&ev)))>
+                        <option value="none">"No pause"</option>
+                        <option value="short">"Short pause"</option>
+                        <option value="long">"Long pause"</option>
+                    </select>
+                    <button on:click=move |_| drill.update(|d| { d.pop(); })>"Undo"</button>
+                    <button on:click=move |_| drill.set(Vec::new())>"Clear"</button>
+                    <button class="primary" on:click=start_drill disabled=move || drill.get().is_empty()>"Start drill"</button>
+                </div>
+
+                <div class="shots">
+                    {move || drill.get().into_iter().enumerate().map(|(i, id)| {
+                        let d = drill_params.get()[(id - 1) as usize];
+                        view! {
+                            <div class="shot">
+                                <strong>{format!("#{} · point {id}", i + 1)}</strong>
+                                <Stepper label="Left ↔ right" value=((d.lr / 30) + 2).to_string() dec_label="◀" inc_label="▶"
+                                    dec=move || edit_shot(i, &|p| p.lr = p.lr.saturating_add(30))
+                                    inc=move || edit_shot(i, &|p| p.lr = p.lr.saturating_sub(30)) />
+                                <Stepper label="Height" value=(d.ud / 100).to_string()
+                                    dec=move || edit_shot(i, &|p| p.ud = p.ud.saturating_sub(100))
+                                    inc=move || edit_shot(i, &|p| p.ud = p.ud.saturating_add(100)) />
+                                <Stepper label="Speed" value=(d.speed as i32 - 30).to_string()
+                                    dec=move || edit_shot(i, &|p| p.speed = p.speed.saturating_sub(5))
+                                    inc=move || edit_shot(i, &|p| p.speed = p.speed.saturating_add(5)) />
+                                <Stepper label="Interval (s)" value=format!("{:.1}", d.interval as f32 / 10.0)
+                                    dec=move || edit_shot(i, &|p| p.interval = p.interval.saturating_sub(5))
+                                    inc=move || edit_shot(i, &|p| p.interval = p.interval.saturating_add(5)) />
+                                <Stepper label="Spin (− back / + top)" value=((d.spin as i32 - 50) / 5).to_string()
+                                    dec=move || edit_shot(i, &|p| p.spin = p.spin.saturating_sub(5))
+                                    inc=move || edit_shot(i, &|p| p.spin = p.spin.saturating_add(5)) />
+                            </div>
+                        }
+                    }).collect_view()}
+                </div>
+
+                <SavedList title="Saved routes" noun="route" names=route_names can_save=Signal::derive(move || !drill.get().is_empty())
+                    on_load=load_route on_delete=delete_route on_save=save_route />
+
+                <h3>"AI Coach"</h3>
+                <p class="hint">"Generates a random drill: the first ball goes deep to the chosen side, the rest anywhere. Level low adds 0.5 s between balls, high removes 0.5 s."</p>
+                <div class="row">
+                    <span>"First ball"</span>
+                    <button class="mode" class:selected=move || ai.get().left on:click=move |_| ai.update(|a| a.left = true)>"Left"</button>
+                    <button class="mode" class:selected=move || !ai.get().left on:click=move |_| ai.update(|a| a.left = false)>"Right"</button>
+                </div>
+                <div class="row">
+                    <span>"Level"</span>
+                    {[(0u8, "Low"), (1, "Mid"), (2, "High")].into_iter().map(|(lv, l)| view! {
+                        <button class="mode" class:selected=move || ai.get().level == lv on:click=move |_| ai.update(|a| a.level = lv)>{l}</button>
+                    }).collect_view()}
+                </div>
+                <div class="row">
+                    <span>"Balls"</span>
+                    <button on:click=move |_| ai.update(|a| a.balls = a.balls.saturating_sub(1).max(2))>"−"</button>
+                    <span class="value">{move || ai.get().balls}</span>
+                    <button on:click=move |_| ai.update(|a| a.balls = (a.balls + 1).min(9))>"+"</button>
+                    <button class="primary" on:click=generate>"Generate"</button>
+                </div>
+            </section>
+        </main>
+
+        <Courses on_practice=practice_course />
+
+        <details>
+            <summary>"BLE log"</summary>
+            <pre>{move || ctx.log.get().join("\n")}</pre>
+        </details>
+    }
+}
+
+#[component]
+fn Slider<T>(
+    label: &'static str,
+    min: i32,
+    max: i32,
+    #[prop(default = 1)] step: i32,
+    value: RwSignal<T>,
+    on_commit: impl Fn() + Copy + 'static,
+) -> impl IntoView
+where
+    T: Copy + std::fmt::Display + std::str::FromStr + Send + Sync + 'static,
+{
+    view! {
+        <label>
+            <span>{label} " " {move || value.get().to_string()}</span>
+            <input type="range" min=min max=max step=step
+                prop:value=move || value.get().to_string()
+                on:input=move |ev| { if let Ok(v) = event_target_value(&ev).parse() { value.set(v) } }
+                on:change=move |_| on_commit() />
+        </label>
+    }
+}
+
+#[component]
+fn PatternGroup(
+    title: &'static str,
+    pattern: RwSignal<Pattern>,
+    select: impl Fn(Pattern) + Copy + 'static,
+    options: Vec<Pattern>,
+) -> impl IntoView {
+    view! {
+        <h3>{title}</h3>
+        <div class="modes">
+            {options.into_iter().map(|opt| {
+                let name = opt.name();
+                let same = opt.clone();
+                view! {
+                    <button class="mode"
+                        class:selected=move || std::mem::discriminant(&pattern.get()) == std::mem::discriminant(&same) && (matches!(same, Pattern::Program(_) | Pattern::Custom(_)) || pattern.get() == same)
+                        on:click=move |_| select(opt.clone())>
+                        {name}
+                    </button>
+                }
+            }).collect_view()}
+        </div>
+    }
+}
+
+/// A numbered target that appends itself to `list`; shows its positions in the order.
+#[component]
+fn PointButton(id: u8, list: RwSignal<Vec<u8>>, max: usize) -> impl IntoView {
+    view! {
+        <button class="target"
+            class:picked=move || list.get().contains(&id)
+            on:click=move |_| list.update(|d| if d.len() < max { d.push(id) })>
+            <small>{id}</small>
+            {move || {
+                let order: Vec<String> = list.get().iter().enumerate()
+                    .filter(|(_, q)| **q == id).map(|(i, _)| (i + 1).to_string()).collect();
+                if order.is_empty() { String::new() } else { format!("#{}", order.join(",")) }
+            }}
+        </button>
+    }
+}
+
+#[component]
+fn Stepper(
+    label: &'static str,
+    value: String,
+    #[prop(default = "−")] dec_label: &'static str,
+    #[prop(default = "+")] inc_label: &'static str,
+    dec: impl Fn() + 'static,
+    inc: impl Fn() + 'static,
+) -> impl IntoView {
+    view! {
+        <div class="stepper">
+            <span>{label}</span>
+            <button on:click=move |_| dec()>{dec_label}</button>
+            <span class="value">{value}</span>
+            <button on:click=move |_| inc()>{inc_label}</button>
+        </div>
+    }
+}
+
+/// Choose / Load / Delete / Save row shared by routes, programs and custom-point sets.
+#[component]
+fn SavedList(
+    title: &'static str,
+    noun: &'static str,
+    names: Signal<Vec<String>>,
+    can_save: Signal<bool>,
+    on_load: impl Fn(String) + Copy + 'static,
+    on_delete: impl Fn(String) + Copy + 'static,
+    on_save: impl Fn(String) + Copy + 'static,
+) -> impl IntoView {
+    let selected = RwSignal::new(String::new());
+    view! {
+        <h3>{title}</h3>
+        <div class="row">
+            <select prop:value=move || selected.get() on:change=move |ev| selected.set(event_target_value(&ev))>
+                <option value="">{move || if names.get().is_empty() { format!("No saved {noun}s") } else { format!("Choose a {noun}…") }}</option>
+                {move || names.get().into_iter().map(|n| view! { <option value=n.clone()>{n.clone()}</option> }).collect_view()}
+            </select>
+            <button on:click=move |_| on_load(selected.get_untracked()) disabled=move || selected.get().is_empty()>"Load"</button>
+            <button disabled=move || selected.get().is_empty()
+                on:click=move |_| { on_delete(selected.get_untracked()); selected.set(String::new()); }>"Delete"</button>
+            <button disabled=move || !can_save.get()
+                on:click=move |_| if let Some(n) = prompt_name(&format!("Name for this {noun}")) { on_save(n.clone()); selected.set(n); }>"Save current"</button>
+        </div>
+    }
+}
