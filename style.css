@@ -50,3 +50,4 @@ button.dirty { border-color: var(--accent); color: var(--accent); font-weight: 6
 .field { margin: .2rem 0; }
 .field input { font: inherit; padding: .4rem; border-radius: .5rem; border: 1px solid var(--line); background: Canvas; color: inherit; width: 100%; box-sizing: border-box; }
 .mono { font-family: ui-monospace, monospace; }
+.sport { display: flex; gap: .3rem; }

@@ -42,6 +42,12 @@ Web Bluetooth only works in **Chrome or Edge** (desktop or Android) on `https://
 - AI Coach: random drills from first-ball side, level and ball count (2–9)
 - Courses: Pusun's online training courses with their videos; "Practice in Vary Speed"
   loads the course's drill, like the app's Start button (works without a machine connected)
+- Tennis / Padel switch (the app's "Paddle Tennis" screen, `MainActivityPad2`), remembered
+  in the browser. Padel uses its own speed table, mid court table (aims 600–700 higher) and
+  custom-point defaults, fine height 4–30, padel aim presets, and three extra shots: Bandeja,
+  Bajada and Serve return. Vary Speed, AI Coach and Courses exist only on the tennis screen.
+  Pattern defaults and the current custom points are stored per sport (the app shares one
+  defaults table between both screens); saved programs and point sets are shared, as in the app
 - BLE log of every frame sent and received
 - Advanced (off by default, "Show advanced" at the bottom): the app's hidden factory
   controls. "Read value" sends `71` and shows the two values of the `30` reply; the point
@@ -76,6 +82,20 @@ Points 1–35 form a 7×5 grid: columns run left to right (left/right value 2070
 crosscourt labels, e.g. "Left deep & middle light" plays points 22 and 4.
 Points 36–41 are the custom points.
 
+## Padel mode
+
+Same frames as tennis, except:
+
+- Speed levels 1–13 map to 66, 76, 80, 83, 87, 91, 95, 100, 105, 115, 125, 135, 145.
+- The mid table is `BasicData21.b3`; low and high tables are the same as tennis.
+- Selection presets (aim, speed): fixed point height 2000, volley 1800, smash (1140, 3600) speed 4,
+  primary (1140, 2300), moon (1140, 3000), bandeja (1140, 4200) speed 3, bajada (1140, 3800)
+  speed 4, serve return (1140, 2000) speed 2. Horizontal and vertical aim at (1320, 2000)
+  (tennis: (1320, 900)). Bandeja, bajada and serve return start like fixed point (`6A 01`).
+- Reselecting fixed point or volley while running sends `66` with trailer `66` instead of `67`.
+- In the official app the padel screen only writes to machines named `PT2…`/`PT8…`;
+  for `PT7…` machines it sends nothing. pusun-web sends anyway and shows a warning.
+
 ## Not verified on hardware
 
 Everything here comes from reading the app's code, not from a captured session.
@@ -86,6 +106,9 @@ Check these with a real machine:
 - Whether the firmware checks the checksum on the quirk frames.
 - Spin range: the app's slider limit was read as ±6 from constants, not from the layout.
 - Timing: start/stop sequences follow the app's delays, but some gaps are approximated.
+- Padel mode on any machine, and in particular on `PT7…` machines (see above).
+- Switching sport: the app reopens the other screen and reconnects; pusun-web instead stops,
+  re-sends the court table, speed and apply on the existing connection.
 
 ## Not ported
 

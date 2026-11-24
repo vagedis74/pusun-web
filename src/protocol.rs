@@ -7,7 +7,7 @@
 //! reproduced byte-for-byte (see the `quirk` notes) because the firmware's
 //! checksum handling is unknown.
 
-use crate::tables::{CALIBRATION, DRILL_POINTS, HEIGHT_HIGH, HEIGHT_LOW};
+use crate::tables::{CALIBRATION, DRILL_POINTS, HEIGHT_HIGH, HEIGHT_LOW, PADEL_CALIBRATION};
 
 pub type Frame = [u8; 10];
 
@@ -16,6 +16,51 @@ pub const TAIL: u8 = 0xA5;
 
 /// Machine speed for slider levels 1..=13 (`veloNums`).
 pub const SPEED_TABLE: [u8; 13] = [76, 83, 90, 95, 105, 115, 125, 135, 145, 155, 160, 170, 180];
+/// Padel screen (`MainActivityPad2.veloNums`): slower balls on the same 13 levels.
+pub const PADEL_SPEED_TABLE: [u8; 13] = [66, 76, 80, 83, 87, 91, 95, 100, 105, 115, 125, 135, 145];
+
+/// Which of the app's two control screens for this machine is being reproduced:
+/// tennis (`MainActivity7New`) or padel ("Paddle Tennis", `MainActivityPad2`).
+/// They share the frame format and differ in speed table, mid court table,
+/// fine-height range and pattern presets.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Sport {
+    Tennis,
+    Padel,
+}
+
+impl Sport {
+    fn speed_table(self) -> &'static [u8; 13] {
+        match self {
+            Sport::Tennis => &SPEED_TABLE,
+            Sport::Padel => &PADEL_SPEED_TABLE,
+        }
+    }
+
+    fn mid_table(self) -> &'static [[i16; 4]; 41] {
+        match self {
+            Sport::Tennis => &CALIBRATION,
+            Sport::Padel => &PADEL_CALIBRATION,
+        }
+    }
+
+    /// Highest fine height level: 16 on the tennis screen, 30 on the padel screen.
+    pub fn height_level_max(self) -> u8 {
+        match self {
+            Sport::Tennis => HEIGHT_LEVEL_MAX,
+            Sport::Padel => PADEL_HEIGHT_LEVEL_MAX,
+        }
+    }
+
+    /// Height of the aim the app sends when a horizontal or vertical pattern is
+    /// selected; left/right is `BasicData3.a11[0]` (1320) on both screens.
+    fn sweep_aim(self) -> (u16, u16) {
+        match self {
+            Sport::Tennis => (1320, 900),
+            Sport::Padel => (1320, 2000),
+        }
+    }
+}
 /// Feed interval for slider levels 1..=10 (`frequentNums`); higher level = faster feed.
 pub const FREQ_TABLE: [u8; 10] = [88, 78, 68, 58, 48, 38, 33, 28, 23, 18];
 
@@ -47,6 +92,12 @@ pub fn apply() -> Frame {
     frame_raw(0x66, [0; 6], 0x67)
 }
 
+/// `0x66` with trailer 0x66: what the padel screen sends instead of [`apply`] when
+/// fixed point or volley is reselected while running.
+pub fn apply_padel_reselect() -> Frame {
+    frame_raw(0x66, [0; 6], 0x66)
+}
+
 /// `0x67`: request battery level (answered by a `0x03` notification).
 pub fn battery_query() -> Frame {
     frame(0x67, [0; 6])
@@ -57,9 +108,9 @@ pub fn stop() -> Frame {
     frame(0x6B, [0; 6])
 }
 
-/// `0x63`: ball speed, level 1..=13.
-pub fn speed(level: u8) -> Frame {
-    let v = SPEED_TABLE[(level.clamp(1, 13) - 1) as usize];
+/// `0x63`: ball speed, level 1..=13, through the screen's speed table.
+pub fn speed(sport: Sport, level: u8) -> Frame {
+    let v = sport.speed_table()[(level.clamp(1, 13) - 1) as usize];
     frame(0x63, [v, 0, 0, 0, 0, 0])
 }
 
@@ -112,17 +163,20 @@ pub enum Height {
 pub const HEIGHT_LEVEL_DEFAULT: u8 = 10;
 pub const HEIGHT_LEVEL_MIN: u8 = 4;
 pub const HEIGHT_LEVEL_MAX: u8 = 16;
+pub const PADEL_HEIGHT_LEVEL_MAX: u8 = 30;
 
 /// Court-point table upload (`sendBaseData`). The app sends the mid table ~1.5 s
 /// after connecting and whenever the height setting changes.
 ///
 /// Mid uploads all 41 points (grid + custom) and shifts the 35 grid points by
 /// `(10 - level) * 100`. Low and high upload only the 35 grid points.
-pub fn calibration(height: Height, level: u8) -> Vec<Frame> {
+/// The padel screen uses its own mid table and the same low and high tables.
+pub fn calibration(sport: Sport, height: Height, level: u8) -> Vec<Frame> {
     match height {
         Height::Mid => {
-            let adjust = (HEIGHT_LEVEL_DEFAULT as i16 - level.clamp(HEIGHT_LEVEL_MIN, HEIGHT_LEVEL_MAX) as i16) * 100;
-            CALIBRATION
+            let adjust = (HEIGHT_LEVEL_DEFAULT as i16 - level.clamp(HEIGHT_LEVEL_MIN, sport.height_level_max()) as i16) * 100;
+            sport
+                .mid_table()
                 .iter()
                 .enumerate()
                 .map(|(i, r)| {
@@ -170,9 +224,9 @@ pub const CUSTOM_SPEED: (u16, u16) = (40, 140);
 pub const CUSTOM_INTERVAL: (u8, u8) = (25, 65);
 
 impl CustomPoint {
-    pub fn defaults() -> [CustomPoint; CUSTOM_POINTS] {
+    pub fn defaults(sport: Sport) -> [CustomPoint; CUSTOM_POINTS] {
         std::array::from_fn(|i| {
-            let r = CALIBRATION[35 + i];
+            let r = sport.mid_table()[35 + i];
             CustomPoint { lr: r[0] as u16, ud: r[1] as u16, speed: r[2] as u16, interval: r[3] as u8 }
         })
     }
@@ -269,6 +323,12 @@ pub enum Pattern {
     Program(Vec<u8>),
     /// Custom points 1..=6 in play order.
     Custom(Vec<u8>),
+    /// Padel only: overhead bandeja, fixed mode.
+    Bandeja,
+    /// Padel only: bajada (off the back wall), fixed mode.
+    Bajada,
+    /// Padel only: serve return, fixed mode.
+    ServeReturn,
 }
 
 pub const HORIZONTAL_NAMES: [&str; 5] = ["Horizontal random", "Wide line", "Middle line", "Narrow line", "Three line"];
@@ -299,30 +359,36 @@ impl Pattern {
             Pattern::Cross(v) => CROSS_NAMES[(*v).clamp(1, 6) as usize - 1].into(),
             Pattern::Program(_) => "Program panel".into(),
             Pattern::Custom(_) => "Custom points".into(),
+            Pattern::Bandeja => "Bandeja".into(),
+            Pattern::Bajada => "Bajada".into(),
+            Pattern::ServeReturn => "Serve return".into(),
         }
     }
 
-    /// Settings the app applies when the pattern is selected.
-    pub fn preset(&self) -> Preset {
+    /// Settings the app applies when the pattern is selected, per screen.
+    pub fn preset(&self, sport: Sport) -> Preset {
         let side = |v: u8| SIDE_LR[(v.clamp(1, 3) - 1) as usize];
+        let padel = sport == Sport::Padel;
+        let pick = |tennis: u16, padel_ud: u16| if padel { padel_ud } else { tennis };
+        // quirk: trailer 0x63 instead of 0x62.
+        let no_spin = (0, frame_raw(0x62, [0; 6], 0x63));
+        // quirk: trailer 0x7A instead of 0x7D.
+        let moon_spin = (6, frame_raw(0x62, [1, 30, 0, 0, 0, 0], 0x7A));
+        let aim = |x: u16, y: u16, speed: u8| Preset { aim: Some((x, y)), speed: Some(speed), ..Preset::default() };
         match self {
-            Pattern::Fixed(v) => Preset { aim: Some((side(*v), 1200)), speed: Some(7), ..Preset::default() },
-            Pattern::Smash => Preset { aim: Some((1140, 4200)), speed: Some(4), ..Preset::default() },
-            Pattern::Volley(v) => Preset { aim: Some((side(*v), 1000)), speed: Some(6), ..Preset::default() },
-            // quirk: trailer 0x63 instead of 0x62. Speed only drops to 1 if above 2.
-            Pattern::Primary => Preset {
-                aim: Some((1140, 1600)),
-                speed_max: Some((2, 1)),
-                spin: Some((0, frame_raw(0x62, [0; 6], 0x63))),
-                ..Preset::default()
-            },
-            // quirk: trailer 0x7A instead of 0x7D.
-            Pattern::Moon => Preset {
-                aim: Some((1140, 1600)),
-                speed: Some(5),
-                spin: Some((6, frame_raw(0x62, [1, 30, 0, 0, 0, 0], 0x7A))),
-                ..Preset::default()
-            },
+            Pattern::Fixed(v) => aim(side(*v), pick(1200, 2000), 7),
+            Pattern::Smash => aim(1140, pick(4200, 3600), 4),
+            Pattern::Volley(v) => aim(side(*v), pick(1000, 1800), 6),
+            // Speed only drops to 1 if above 2.
+            Pattern::Primary => Preset { aim: Some((1140, pick(1600, 2300))), speed_max: Some((2, 1)), spin: Some(no_spin), ..Preset::default() },
+            Pattern::Moon => Preset { spin: Some(moon_spin), ..aim(1140, pick(1600, 3000), 5) },
+            Pattern::Horizontal(_) | Pattern::Vertical(_) => {
+                let (x, y) = sport.sweep_aim();
+                aim(x, y, 7)
+            }
+            Pattern::Bandeja => aim(1140, 4200, 3),
+            Pattern::Bajada => aim(1140, 3800, 4),
+            Pattern::ServeReturn => aim(1140, 2000, 2),
             _ => Preset { speed: Some(7), ..Preset::default() },
         }
     }
@@ -331,7 +397,9 @@ impl Pattern {
     pub fn start(&self) -> Vec<(u32, Frame)> {
         let fixed = frame(0x6A, [1, 0, 0, 0, 0, 0]);
         let mut steps: Vec<(u32, Frame)> = match self {
-            Pattern::Fixed(_) | Pattern::Smash | Pattern::Volley(_) | Pattern::Primary | Pattern::Moon => vec![(200, fixed)],
+            Pattern::Fixed(_) | Pattern::Smash | Pattern::Volley(_) | Pattern::Primary | Pattern::Moon | Pattern::Bandeja | Pattern::Bajada | Pattern::ServeReturn => {
+                vec![(200, fixed)]
+            }
             Pattern::Random => vec![(0, frame(0x6A, [4, 0, 0, 0, 0, 0]))],
             Pattern::Horizontal(v) => vec![(0, HORIZONTAL_FRAMES[((*v).clamp(1, 5) - 1) as usize])],
             Pattern::Vertical(v) => vec![(0, VERTICAL_FRAMES[((*v).clamp(1, 3) - 1) as usize])],
@@ -367,6 +435,9 @@ impl Pattern {
             Pattern::Cross(v) => format!("cross{v}"),
             Pattern::Primary => "place".into(),
             Pattern::Moon => "moon".into(),
+            Pattern::Bandeja => "bandeja".into(),
+            Pattern::Bajada => "bajada".into(),
+            Pattern::ServeReturn => "sreturn".into(),
             Pattern::Program(_) | Pattern::Custom(_) => return None,
         })
     }
@@ -414,15 +485,15 @@ impl PatternDefault {
     /// (`setDefaultMode`): aim, then frequency, speed and spin, then the mid court
     /// table if a height level is stored. Delays are relative to the previous step.
     /// quirk: the aim is sent as stored, without the per-pattern masking.
-    pub fn apply_steps(&self) -> Vec<(u32, Frame)> {
+    pub fn apply_steps(&self, sport: Sport) -> Vec<(u32, Frame)> {
         let mut v = vec![
             (0, position(self.lr, self.ud)),
             (30, frequency(self.freq)),
-            (50, speed(self.speed)),
+            (50, speed(sport, self.speed)),
             (40, spin(self.spin)),
         ];
         if self.height_level != 0 {
-            let mut table = calibration(Height::Mid, self.height_level).into_iter();
+            let mut table = calibration(sport, Height::Mid, self.height_level).into_iter();
             v.push((40, table.next().unwrap()));
             v.extend(table.map(|f| (10, f)));
         }
@@ -458,10 +529,10 @@ pub struct ProgramSettings {
 impl ProgramSettings {
     /// Frames sent when a saved program is loaded: apply, frequency, speed and spin,
     /// then the mid court table at `level` (the saved level, or the current one if 0).
-    pub fn load_steps(&self, current_level: u8) -> Vec<(u32, Frame)> {
+    pub fn load_steps(&self, sport: Sport, current_level: u8) -> Vec<(u32, Frame)> {
         let level = if self.height_level == 0 { current_level } else { self.height_level };
-        let mut v = vec![(5, apply()), (25, frequency(self.freq)), (50, speed(self.speed)), (40, spin(self.spin))];
-        let mut table = calibration(Height::Mid, level).into_iter();
+        let mut v = vec![(5, apply()), (25, frequency(self.freq)), (50, speed(sport, self.speed)), (40, spin(self.spin))];
+        let mut table = calibration(sport, Height::Mid, level).into_iter();
         v.push((40, table.next().unwrap()));
         v.extend(table.map(|f| (10, f)));
         v
@@ -728,7 +799,7 @@ mod tests {
         let pt = RawPoint { id: 17, lr: 1140, ud: 2600, speed: 105, interval: 40 };
         assert_eq!(pt.frame(), [0xAA, 17, 0x04, 0x74, 0x0A, 0x28, 0, 105, 40, 0xA5]);
         assert_eq!(RawPoint::from_frame(&pt.frame()), pt);
-        for f in calibration(Height::Mid, 10) {
+        for f in calibration(Sport::Tennis, Height::Mid, 10) {
             assert_eq!(RawPoint::from_frame(&f).frame(), f);
         }
         assert_eq!(RawPoint { id: 0, ..pt }.frame()[1], 1);
@@ -781,17 +852,17 @@ mod tests {
 
     #[test]
     fn presets_match_app() {
-        assert_eq!(Pattern::Fixed(3).preset().aim, Some((2070, 1200)));
-        assert_eq!(Pattern::Volley(2).preset().aim, Some((210, 1000)));
-        assert_eq!(Pattern::Smash.preset().speed, Some(4));
-        assert_eq!(Pattern::Moon.preset().spin.unwrap().1, [0xAA, 0x62, 1, 0x1E, 0, 0, 0, 0, 0x7A, 0xA5]);
-        assert_eq!(Pattern::Primary.preset().spin.unwrap().1, [0xAA, 0x62, 0, 0, 0, 0, 0, 0, 0x63, 0xA5]);
+        assert_eq!(Pattern::Fixed(3).preset(Sport::Tennis).aim, Some((2070, 1200)));
+        assert_eq!(Pattern::Volley(2).preset(Sport::Tennis).aim, Some((210, 1000)));
+        assert_eq!(Pattern::Smash.preset(Sport::Tennis).speed, Some(4));
+        assert_eq!(Pattern::Moon.preset(Sport::Tennis).spin.unwrap().1, [0xAA, 0x62, 1, 0x1E, 0, 0, 0, 0, 0x7A, 0xA5]);
+        assert_eq!(Pattern::Primary.preset(Sport::Tennis).spin.unwrap().1, [0xAA, 0x62, 0, 0, 0, 0, 0, 0, 0x63, 0xA5]);
         assert_eq!(stop_sequence().iter().map(|s| s.1[1]).collect::<Vec<_>>(), vec![0x6B, 0x67, 0x66]);
     }
 
     #[test]
     fn controls_match_app_formulas() {
-        assert_eq!(speed(5), [0xAA, 99, 105, 0, 0, 0, 0, 0, 105 ^ 99, 0xA5]);
+        assert_eq!(speed(Sport::Tennis, 5), [0xAA, 99, 105, 0, 0, 0, 0, 0, 105 ^ 99, 0xA5]);
         assert_eq!(frequency(1), [0xAA, 97, 88, 0, 0, 0, 0, 0, 88 ^ 97, 0xA5]);
         assert_eq!(spin(0), [0xAA, 98, 0, 0, 0, 0, 0, 0, 98, 0xA5]);
         assert_eq!(spin(3), [0xAA, 98, 1, 15, 0, 0, 0, 0, 15 ^ 99, 0xA5]);
@@ -855,14 +926,14 @@ mod tests {
         assert_eq!(Pattern::Program(vec![1]).default_key(), None);
 
         let d = PatternDefault { lr: 2070, ud: 1200, freq: 3, speed: 8, spin: -2, height_level: 12 };
-        let s = d.apply_steps();
+        let s = d.apply_steps(Sport::Tennis);
         assert_eq!(s[0].1, position(2070, 1200));
         assert_eq!(s[1].1, frequency(3));
-        assert_eq!(s[2].1, speed(8));
+        assert_eq!(s[2].1, speed(Sport::Tennis, 8));
         assert_eq!(s[3].1, [0xAA, 98, 2, 10, 0, 0, 0, 0, 10 ^ 96, 0xA5]);
         assert_eq!(s.len(), 4 + 41);
-        assert_eq!(s[4].1, calibration(Height::Mid, 12)[0]);
-        assert_eq!(PatternDefault { height_level: 0, ..d }.apply_steps().len(), 4);
+        assert_eq!(s[4].1, calibration(Sport::Tennis, Height::Mid, 12)[0]);
+        assert_eq!(PatternDefault { height_level: 0, ..d }.apply_steps(Sport::Tennis).len(), 4);
 
         let moved = PatternDefault { lr: 210, ..d };
         assert!(d.differs(&Pattern::Fixed(1), &moved));
@@ -875,18 +946,18 @@ mod tests {
     #[test]
     fn saved_programs_and_sets() {
         let prog = ProgramSettings { freq: 2, speed: 9, spin: 3, height: Height::Low, height_level: 13 };
-        let st = prog.load_steps(10);
+        let st = prog.load_steps(Sport::Tennis, 10);
         assert_eq!(st[0].1, apply());
         assert_eq!(st[1].1, frequency(2));
-        assert_eq!(st[2].1, speed(9));
+        assert_eq!(st[2].1, speed(Sport::Tennis, 9));
         assert_eq!(st[3].1, spin(3));
         // Always the mid table, at the saved level.
-        assert_eq!(st[4].1, calibration(Height::Mid, 13)[0]);
+        assert_eq!(st[4].1, calibration(Sport::Tennis, Height::Mid, 13)[0]);
         assert_eq!(st.len(), 4 + 41);
-        assert_eq!(ProgramSettings { height_level: 0, ..prog }.load_steps(7)[4].1, calibration(Height::Mid, 7)[0]);
+        assert_eq!(ProgramSettings { height_level: 0, ..prog }.load_steps(Sport::Tennis, 7)[4].1, calibration(Sport::Tennis, Height::Mid, 7)[0]);
         assert_eq!(st.iter().map(|x| x.0).take(5).collect::<Vec<_>>(), vec![5, 25, 50, 40, 40]);
 
-        let mut pts = CustomPoint::defaults();
+        let mut pts = CustomPoint::defaults(Sport::Tennis);
         pts[5].lr = 300;
         let cs = custom_set_load_steps(&pts);
         assert_eq!(cs.len(), 7);
@@ -897,18 +968,18 @@ mod tests {
 
     #[test]
     fn calibration_upload() {
-        let f = calibration(Height::Mid, 10);
+        let f = calibration(Sport::Tennis, Height::Mid, 10);
         assert_eq!(f.len(), 41);
         assert_eq!(f[0], [0xAA, 1, 0x08, 0x16, 0x03, 0xE8, 0, 125, 33, 0xA5]);
         // Level 11 raises grid points by 100 and leaves the custom points alone.
-        assert_eq!(calibration(Height::Mid, 11)[0][4..6], [0x04, 0x4C]);
-        assert_eq!(calibration(Height::Mid, 11)[40], f[40]);
+        assert_eq!(calibration(Sport::Tennis, Height::Mid, 11)[0][4..6], [0x04, 0x4C]);
+        assert_eq!(calibration(Sport::Tennis, Height::Mid, 11)[40], f[40]);
         // Low/high: 35 rows with XOR checksums, as in sendBaseData(0/2).
-        let low = calibration(Height::Low, 10);
+        let low = calibration(Sport::Tennis, Height::Low, 10);
         assert_eq!(low.len(), 35);
         assert_eq!(low[0], frame(1, [0x08, 0x16, 0x03, 0x20, 0, 0]));
-        assert_eq!(calibration(Height::High, 10)[34][4..6], [0x06, 0xA4]);
-        assert_eq!(custom_point(1, CustomPoint::defaults()[0]), f[35]);
+        assert_eq!(calibration(Sport::Tennis, Height::High, 10)[34][4..6], [0x06, 0xA4]);
+        assert_eq!(custom_point(1, CustomPoint::defaults(Sport::Tennis)[0]), f[35]);
         assert_eq!(custom_point(6, CustomPoint { lr: 5000, ud: 9000, speed: 1, interval: 99 })[2..9], [0x08, 0x16, 0x10, 0xCC, 0, 40, 65]);
     }
 
@@ -924,5 +995,48 @@ mod tests {
         assert_eq!(parse_notification(&[0xAA, 0x5E, 3]), Notification::Fault(Fault::OutOfBalls));
         assert_eq!(battery_bars(44), 0);
         assert_eq!(battery_bars(68), 4);
+    }
+
+    // Expected values from MainActivityPad2 (the app's "Paddle Tennis" screen).
+    #[test]
+    fn padel_matches_app() {
+        assert_eq!(speed(Sport::Padel, 1), [0xAA, 99, 66, 0, 0, 0, 0, 0, 66 ^ 99, 0xA5]);
+        assert_eq!(speed(Sport::Padel, 7)[2], 95);
+        assert_eq!(speed(Sport::Padel, 13)[2], 145);
+
+        let mid = calibration(Sport::Padel, Height::Mid, 10);
+        assert_eq!(mid.len(), 41);
+        assert_eq!(mid[0], [0xAA, 1, 0x08, 0x16, 0x06, 0x40, 0, 125, 33, 0xA5]);
+        // Level 30 raises the grid by 2000 but leaves the custom points alone.
+        let top = calibration(Sport::Padel, Height::Mid, 30);
+        assert_eq!(RawPoint::from_frame(&top[34]).ud, 2100 + 2000);
+        assert_eq!(top[40], mid[40]);
+        assert_eq!(calibration(Sport::Tennis, Height::Mid, 30), calibration(Sport::Tennis, Height::Mid, 16));
+        // Low and high tables are shared with tennis.
+        assert_eq!(calibration(Sport::Padel, Height::High, 10), calibration(Sport::Tennis, Height::High, 10));
+
+        let c = CustomPoint::defaults(Sport::Padel);
+        assert_eq!(c[0], CustomPoint { lr: 1860, ud: 2200, speed: 55, interval: 40 });
+        assert_eq!(c[5], CustomPoint { lr: 520, ud: 4200, speed: 88, interval: 40 });
+        assert_eq!(custom_point(1, c[0]), mid[35]);
+
+        let pre = |p: Pattern| p.preset(Sport::Padel);
+        assert_eq!(pre(Pattern::Fixed(2)).aim, Some((210, 2000)));
+        assert_eq!(pre(Pattern::Volley(3)).aim, Some((2070, 1800)));
+        assert_eq!((pre(Pattern::Smash).aim, pre(Pattern::Smash).speed), (Some((1140, 3600)), Some(4)));
+        assert_eq!(pre(Pattern::Primary).aim, Some((1140, 2300)));
+        assert_eq!(pre(Pattern::Moon).aim, Some((1140, 3000)));
+        assert_eq!((pre(Pattern::Bandeja).aim, pre(Pattern::Bandeja).speed), (Some((1140, 4200)), Some(3)));
+        assert_eq!((pre(Pattern::Bajada).aim, pre(Pattern::Bajada).speed), (Some((1140, 3800)), Some(4)));
+        assert_eq!((pre(Pattern::ServeReturn).aim, pre(Pattern::ServeReturn).speed), (Some((1140, 2000)), Some(2)));
+        assert_eq!(pre(Pattern::Horizontal(2)).aim, Some((1320, 2000)));
+        assert_eq!(Pattern::Vertical(1).preset(Sport::Tennis).aim, Some((1320, 900)));
+
+        for p in [Pattern::Bandeja, Pattern::Bajada, Pattern::ServeReturn] {
+            assert_eq!(p.start()[0], (200, [0xAA, 106, 1, 0, 0, 0, 0, 0, 107, 0xA5]));
+        }
+        assert_eq!(Pattern::ServeReturn.default_key().as_deref(), Some("sreturn"));
+        assert_eq!(Pattern::Bandeja.default_key().as_deref(), Some("bandeja"));
+        assert_eq!(apply_padel_reselect(), [0xAA, 102, 0, 0, 0, 0, 0, 0, 102, 0xA5]);
     }
 }

@@ -6,7 +6,7 @@ use leptos::task::spawn_local;
 
 use crate::ble::Machine;
 use crate::courses::Courses;
-use crate::protocol::{self as p, AiOptions, CustomPoint, DrillPause, DrillPoint, Frame, Height, Notification, Pattern, PatternDefault, ProgramSettings, RawPoint};
+use crate::protocol::{self as p, AiOptions, CustomPoint, DrillPause, DrillPoint, Frame, Height, Notification, Pattern, PatternDefault, ProgramSettings, RawPoint, Sport};
 
 /// A frame and the delay before sending it, mirroring the app's `postDelayed` gaps.
 type Step = (u32, Frame);
@@ -15,6 +15,25 @@ const CUSTOM_KEY: &str = "pusun-web.custom-points";
 const ROUTES_KEY: &str = "pusun-web.routes";
 const DEFAULTS_KEY: &str = "pusun-web.pattern-defaults";
 const ADVANCED_KEY: &str = "pusun-web.advanced";
+const SPORT_KEY: &str = "pusun-web.sport";
+const PADEL_CUSTOM_KEY: &str = "pusun-web.padel.custom-points";
+
+fn custom_key(sport: Sport) -> &'static str {
+    match sport {
+        Sport::Tennis => CUSTOM_KEY,
+        Sport::Padel => PADEL_CUSTOM_KEY,
+    }
+}
+
+/// Saved defaults are kept apart per screen. The app shares one table between its
+/// tennis and padel screens, which would apply tennis aims to padel and vice versa.
+fn default_key(sport: Sport, pat: &Pattern) -> Option<String> {
+    let k = pat.default_key()?;
+    Some(match sport {
+        Sport::Tennis => k,
+        Sport::Padel => format!("padel:{k}"),
+    })
+}
 
 /// Saved per-pattern defaults, keyed like the app (`fix1`, `lr3`, `moon`, ...).
 fn load_defaults() -> Vec<(String, PatternDefault)> {
@@ -32,7 +51,7 @@ fn load_defaults() -> Vec<(String, PatternDefault)> {
                     freq: (freq as u8).clamp(1, 10),
                     speed: (speed as u8).clamp(1, 13),
                     spin: (spin as i8).clamp(-p::SPIN_MAX, p::SPIN_MAX),
-                    height_level: if level == 0 { 0 } else { (level as u8).clamp(p::HEIGHT_LEVEL_MIN, p::HEIGHT_LEVEL_MAX) },
+                    height_level: if level == 0 { 0 } else { (level as u8).clamp(p::HEIGHT_LEVEL_MIN, p::PADEL_HEIGHT_LEVEL_MAX) },
                 },
             ))
         })
@@ -165,7 +184,7 @@ fn load_programs() -> Vec<SavedProgram> {
                     speed: (speed as u8).clamp(1, 13),
                     spin: (spin as i8).clamp(-p::SPIN_MAX, p::SPIN_MAX),
                     height: match height { 0 => Height::Low, 2 => Height::High, _ => Height::Mid },
-                    height_level: if level == 0 { 0 } else { (level as u8).clamp(p::HEIGHT_LEVEL_MIN, p::HEIGHT_LEVEL_MAX) },
+                    height_level: if level == 0 { 0 } else { (level as u8).clamp(p::HEIGHT_LEVEL_MIN, p::PADEL_HEIGHT_LEVEL_MAX) },
                 },
             })
         })
@@ -195,7 +214,7 @@ fn load_custom_sets() -> Vec<CustomSet> {
         .into_iter()
         .filter_map(|(name, v)| {
             let (order, rest) = v.split_once('\t')?;
-            let mut points = CustomPoint::defaults();
+            let mut points = CustomPoint::defaults(Sport::Tennis);
             for (i, row) in rest.split(';').take(p::CUSTOM_POINTS).enumerate() {
                 let [lr, ud, speed, interval] = nums::<u16>(row)[..] else { return None };
                 points[i] = CustomPoint { lr, ud, speed, interval: interval as u8 }.clamped();
@@ -266,9 +285,9 @@ fn storage() -> Option<web_sys::Storage> {
     web_sys::window()?.local_storage().ok().flatten()
 }
 
-fn load_custom() -> [CustomPoint; p::CUSTOM_POINTS] {
-    let mut pts = CustomPoint::defaults();
-    if let Some(s) = storage().and_then(|s| s.get_item(CUSTOM_KEY).ok().flatten()) {
+fn load_custom(sport: Sport) -> [CustomPoint; p::CUSTOM_POINTS] {
+    let mut pts = CustomPoint::defaults(sport);
+    if let Some(s) = storage().and_then(|s| s.get_item(custom_key(sport)).ok().flatten()) {
         for (i, row) in s.split(';').take(p::CUSTOM_POINTS).enumerate() {
             let v: Vec<u16> = row.split(',').filter_map(|x| x.parse().ok()).collect();
             if let [lr, ud, speed, interval] = v[..] {
@@ -279,10 +298,10 @@ fn load_custom() -> [CustomPoint; p::CUSTOM_POINTS] {
     pts
 }
 
-fn save_custom(pts: &[CustomPoint; p::CUSTOM_POINTS]) {
+fn save_custom(sport: Sport, pts: &[CustomPoint; p::CUSTOM_POINTS]) {
     let s = pts.iter().map(|c| format!("{},{},{},{}", c.lr, c.ud, c.speed, c.interval)).collect::<Vec<_>>().join(";");
     if let Some(st) = storage() {
-        let _ = st.set_item(CUSTOM_KEY, &s);
+        let _ = st.set_item(custom_key(sport), &s);
     }
 }
 
@@ -304,6 +323,10 @@ pub fn App() -> impl IntoView {
     let running = RwSignal::new(false);
     let connecting = RwSignal::new(false);
 
+    let sport = RwSignal::new(match storage().and_then(|s| s.get_item(SPORT_KEY).ok().flatten()).as_deref() {
+        Some("padel") => Sport::Padel,
+        _ => Sport::Tennis,
+    });
     let speed = RwSignal::new(5u8);
     let freq = RwSignal::new(5u8);
     let spin = RwSignal::new(0i8);
@@ -315,7 +338,7 @@ pub fn App() -> impl IntoView {
     let pattern = RwSignal::new(Pattern::Fixed(1));
     let program = RwSignal::new(Vec::<u8>::new());
     let custom_seq = RwSignal::new(Vec::<u8>::new());
-    let custom = RwSignal::new(load_custom());
+    let custom = RwSignal::new(load_custom(sport.get_untracked()));
     let editing = RwSignal::new(1u8);
     let defaults = RwSignal::new(load_defaults());
     let notice = RwSignal::new(None::<String>);
@@ -339,7 +362,7 @@ pub fn App() -> impl IntoView {
 
     // Court table for the current height setting, plus the saved custom points.
     let table_upload = move |first_delay: u32| {
-        let mut steps = table_steps(p::calibration(height.get_untracked(), height_level.get_untracked()), first_delay);
+        let mut steps = table_steps(p::calibration(sport.get_untracked(), height.get_untracked(), height_level.get_untracked()), first_delay);
         if height.get_untracked() == Height::Mid {
             steps.extend(custom.get_untracked().iter().enumerate().map(|(i, c)| (10, p::custom_point(i as u8 + 1, *c))));
         }
@@ -370,7 +393,7 @@ pub fn App() -> impl IntoView {
                     // Same order and timing as the app's onConnectSuccess.
                     let mut steps = table_upload(1500);
                     steps.extend([
-                        (300, p::speed(speed.get_untracked())),
+                        (300, p::speed(sport.get_untracked(), speed.get_untracked())),
                         (150, p::frequency(freq.get_untracked())),
                         (50, p::lr_limits()),
                         (50, p::ud_limits()),
@@ -391,7 +414,7 @@ pub fn App() -> impl IntoView {
         }
     };
 
-    let send_speed = move || ctx.run(vec![(0, p::speed(speed.get_untracked())), (50, p::apply())]);
+    let send_speed = move || ctx.run(vec![(0, p::speed(sport.get_untracked(), speed.get_untracked())), (50, p::apply())]);
     let send_freq = move || ctx.run(vec![(0, p::frequency(freq.get_untracked())), (50, p::apply())]);
     let send_spin = move || {
         let s = spin.get_untracked();
@@ -399,7 +422,7 @@ pub fn App() -> impl IntoView {
         // The app raises speed to level 5 before applying any spin.
         if s != 0 && speed.get_untracked() < 5 {
             speed.set(5);
-            steps.push((0, p::speed(5)));
+            steps.push((0, p::speed(sport.get_untracked(), 5)));
         }
         if s == 0 {
             steps.extend([(0, p::spin(0)), (50, p::apply())]);
@@ -446,23 +469,23 @@ pub fn App() -> impl IntoView {
     // Selecting a pattern applies its preset like the app does, and restarts if running.
     let select = move |pat: Pattern| {
         pattern.set(pat.clone());
-        let pre = pat.preset();
+        let sp = sport.get_untracked();
+        let pre = pat.preset(sp);
         let mut steps: Vec<Step> = Vec::new();
+        // The app sends the preset aim as is, including on horizontal and vertical patterns.
         if let Some((x, y)) = pre.aim {
             lr.set(x);
             ud.set(y);
-        }
-        if pre.aim.is_some() || matches!(pat, Pattern::Horizontal(_) | Pattern::Vertical(_)) {
-            steps.push((0, position_frame()));
+            steps.push((0, p::position(x, y)));
         }
         if let Some(s) = pre.speed {
             speed.set(s);
-            steps.push((50, p::speed(s)));
+            steps.push((50, p::speed(sp, s)));
         }
         if let Some((threshold, level)) = pre.speed_max {
             if speed.get_untracked() > threshold {
                 speed.set(level);
-                steps.push((50, p::speed(level)));
+                steps.push((50, p::speed(sp, level)));
             }
         }
         if let Some((level, f)) = pre.spin {
@@ -470,7 +493,7 @@ pub fn App() -> impl IntoView {
             steps.push((50, f));
         }
         // A saved default for this pattern overrides the preset, as in setDefaultMode.
-        let saved = pat.default_key().and_then(|k| defaults.get_untracked().into_iter().find(|(key, _)| *key == k));
+        let saved = default_key(sp, &pat).and_then(|k| defaults.get_untracked().into_iter().find(|(key, _)| *key == k));
         if let Some((_, d)) = saved {
             lr.set(d.lr);
             ud.set(d.ud);
@@ -481,10 +504,11 @@ pub fn App() -> impl IntoView {
                 height.set(Height::Mid);
                 height_level.set(d.height_level);
             }
-            steps.extend(d.apply_steps());
+            steps.extend(d.apply_steps(sp));
         }
         notice.set(None);
-        steps.push((50, p::apply()));
+        let reselect = sp == Sport::Padel && running.get_untracked() && matches!(pat, Pattern::Fixed(_) | Pattern::Volley(_));
+        steps.push((50, if reselect { p::apply_padel_reselect() } else { p::apply() }));
         if running.get_untracked() && pat.is_ready() {
             steps.extend(current_pattern().start());
         }
@@ -500,7 +524,7 @@ pub fn App() -> impl IntoView {
         height_level: height_level.get(),
     };
     let saved_default = move || {
-        let key = pattern.get().default_key()?;
+        let key = default_key(sport.get(), &pattern.get())?;
         defaults.get().into_iter().find(|(k, _)| *k == key).map(|(_, d)| d)
     };
     // Like the app's SaveDefault button: highlighted when there is something new to save.
@@ -509,7 +533,7 @@ pub fn App() -> impl IntoView {
         None => true,
     };
     let save_default = move |_| {
-        let Some(key) = pattern.get_untracked().default_key() else { return };
+        let Some(key) = default_key(sport.get_untracked(), &pattern.get_untracked()) else { return };
         if !default_dirty() {
             notice.set(Some("No change for default value.".into()));
             return;
@@ -523,7 +547,7 @@ pub fn App() -> impl IntoView {
         notice.set(Some("Current values have been saved as default.".into()));
     };
     let forget_default = move |_| {
-        let Some(key) = pattern.get_untracked().default_key() else { return };
+        let Some(key) = default_key(sport.get_untracked(), &pattern.get_untracked()) else { return };
         defaults.update(|d| {
             d.retain(|(k, _)| *k != key);
             save_defaults(d);
@@ -536,7 +560,7 @@ pub fn App() -> impl IntoView {
         ctx.run(table_upload(0));
     };
     let change_level = move |delta: i8| {
-        let lvl = (height_level.get_untracked() as i8 + delta).clamp(p::HEIGHT_LEVEL_MIN as i8, p::HEIGHT_LEVEL_MAX as i8) as u8;
+        let lvl = (height_level.get_untracked() as i8 + delta).clamp(p::HEIGHT_LEVEL_MIN as i8, sport.get_untracked().height_level_max() as i8) as u8;
         if lvl == height_level.get_untracked() {
             return;
         }
@@ -554,7 +578,7 @@ pub fn App() -> impl IntoView {
             *pt = pt.clamped();
         });
         let pts = custom.get_untracked();
-        save_custom(&pts);
+        save_custom(sport.get_untracked(), &pts);
         ctx.run(vec![(0, p::custom_point(n, pts[(n - 1) as usize])), (50, p::apply())]);
     };
 
@@ -661,7 +685,7 @@ pub fn App() -> impl IntoView {
         if s.height_level != 0 {
             height_level.set(s.height_level);
         }
-        ctx.run(s.load_steps(height_level.get_untracked()));
+        ctx.run(s.load_steps(sport.get_untracked(), height_level.get_untracked()));
     };
     let delete_program = move |name: String| {
         programs.update(|l| {
@@ -681,7 +705,7 @@ pub fn App() -> impl IntoView {
         let Some(x) = custom_sets.get_untracked().into_iter().find(|x| x.name == name) else { return };
         custom_seq.set(x.order);
         custom.set(x.points);
-        save_custom(&x.points);
+        save_custom(sport.get_untracked(), &x.points);
         ctx.run(p::custom_set_load_steps(&x.points));
     };
     let delete_custom_set = move |name: String| {
@@ -703,6 +727,32 @@ pub fn App() -> impl IntoView {
         }
     };
 
+    // The app's "Paddle Tennis" / "Tennis" button opens the other screen, which
+    // reconnects and uploads its own court table. Here the table is re-sent in place.
+    let switch_sport = move |s: Sport| {
+        if sport.get_untracked() == s {
+            return;
+        }
+        let mut steps: Vec<Step> = Vec::new();
+        if running.get_untracked() {
+            running.set(false);
+            steps.extend(p::stop_sequence());
+        }
+        sport.set(s);
+        if let Some(st) = storage() {
+            let _ = st.set_item(SPORT_KEY, if s == Sport::Padel { "padel" } else { "tennis" });
+        }
+        custom.set(load_custom(s));
+        height_level.update(|l| *l = (*l).min(s.height_level_max()));
+        pattern.set(Pattern::Fixed(1));
+        notice.set(None);
+        steps.extend(table_upload(300));
+        steps.extend([(300, p::speed(s, speed.get_untracked())), (50, p::apply())]);
+        ctx.run(steps);
+    };
+    let padel = move || sport.get() == Sport::Padel;
+    let pt7_padel = move || padel() && ctx.name.get().is_some_and(|n| n.starts_with("PT7"));
+
     let connected = move || ctx.name.get().is_some();
     let is_program = move || matches!(pattern.get(), Pattern::Program(_));
     let is_custom = move || matches!(pattern.get(), Pattern::Custom(_));
@@ -710,6 +760,10 @@ pub fn App() -> impl IntoView {
     view! {
         <header>
             <h1>"PT-9001 control"</h1>
+            <div class="sport" role="group" aria-label="Sport">
+                <button class="mode" class:selected=move || !padel() on:click=move |_| switch_sport(Sport::Tennis)>"Tennis"</button>
+                <button class="mode" class:selected=padel on:click=move |_| switch_sport(Sport::Padel)>"Padel"</button>
+            </div>
             <Show
                 when=connected
                 fallback=move || view! {
@@ -733,6 +787,9 @@ pub fn App() -> impl IntoView {
         <Show when=move || ctx.error.get().is_some()>
             <p class="error">{move || ctx.error.get()} " " <button on:click=move |_| ctx.error.set(None)>"Dismiss"</button></p>
         </Show>
+        <Show when=pt7_padel>
+            <p class="error">"This machine's name starts with PT7. The official app sends nothing to PT7 machines from its padel screen, so padel mode may not be supported on this model. Untested."</p>
+        </Show>
         <Show when=move || fault.get().is_some()>
             <p class="fault">{move || fault.get()} " " <button on:click=move |_| fault.set(None)>"Dismiss"</button></p>
         </Show>
@@ -741,7 +798,7 @@ pub fn App() -> impl IntoView {
             <section class="sticky">
                 <div class="run">
                     <span class="current">{move || pattern.get().name()}</span>
-                    <Show when=move || pattern.get().default_key().is_some()>
+                    <Show when=move || default_key(sport.get(), &pattern.get()).is_some()>
                         <button class:dirty=default_dirty on:click=save_default
                             title="Save the current aim, speed, frequency, spin and height as this pattern's default">"Save default"</button>
                         <Show when=move || saved_default().is_some()>
@@ -798,6 +855,11 @@ pub fn App() -> impl IntoView {
                     Pattern::Primary, Pattern::Smash, Pattern::Moon,
                     Pattern::Volley(1), Pattern::Volley(2), Pattern::Volley(3),
                 ] />
+                <div style:display=move || if padel() { "" } else { "none" }>
+                    <PatternGroup title="Padel shots" pattern=pattern select=select options=vec![
+                        Pattern::Bandeja, Pattern::Bajada, Pattern::ServeReturn,
+                    ] />
+                </div>
                 <PatternGroup title="Horizontal" pattern=pattern select=select options=(1..=5).map(Pattern::Horizontal).collect() />
                 <PatternGroup title="Vertical" pattern=pattern select=select options=(1..=3).map(Pattern::Vertical).collect() />
                 <PatternGroup title="Crosscourt" pattern=pattern select=select options=(1..=6).map(Pattern::Cross).collect() />
@@ -858,9 +920,9 @@ pub fn App() -> impl IntoView {
                         <button on:click=move |_| custom_seq.update(|d| { d.pop(); })>"Undo"</button>
                         <button on:click=move |_| custom_seq.set(Vec::new())>"Clear"</button>
                         <button on:click=move |_| {
-                            let d = CustomPoint::defaults();
+                            let d = CustomPoint::defaults(sport.get_untracked());
                             custom.set(d);
-                            save_custom(&d);
+                            save_custom(sport.get_untracked(), &d);
                             ctx.run(d.iter().enumerate().map(|(i, c)| (10, p::custom_point(i as u8 + 1, *c))).chain([(50, p::apply())]).collect());
                         }>"Reset points"</button>
                     </div>
@@ -869,7 +931,7 @@ pub fn App() -> impl IntoView {
                 </Show>
             </section>
 
-            <section id="vary-speed">
+            <section id="vary-speed" style:display=move || if padel() { "none" } else { "" }>
                 <h2>"Vary Speed"</h2>
                 <p class="hint">"Tap targets in play order (max " {p::MAX_DRILL_SHOTS} "), far side at the top. Each shot can be tuned below; settings belong to the point, so a repeated point plays the same."</p>
                 <div class="court">
@@ -943,7 +1005,9 @@ pub fn App() -> impl IntoView {
             </section>
         </main>
 
-        <Courses on_practice=practice_course />
+        <div style:display=move || if padel() { "none" } else { "" }>
+            <Courses on_practice=practice_course />
+        </div>
 
         <label class="toggle">
             <input type="checkbox" prop:checked=move || advanced.get()
@@ -955,7 +1019,7 @@ pub fn App() -> impl IntoView {
             <span>"Show advanced (factory) controls"</span>
         </label>
         <Show when=move || advanced.get()>
-            <Advanced ctx=ctx status=status height=height height_level=height_level custom=custom />
+            <Advanced ctx=ctx sport=sport status=status height=height height_level=height_level custom=custom />
         </Show>
 
         <details>
@@ -1078,12 +1142,12 @@ fn SavedList(
 }
 
 /// Point as currently uploaded: the height table, or the saved custom point on mid.
-fn current_point(id: u8, height: Height, level: u8, custom: &[CustomPoint; p::CUSTOM_POINTS]) -> RawPoint {
+fn current_point(id: u8, sport: Sport, height: Height, level: u8, custom: &[CustomPoint; p::CUSTOM_POINTS]) -> RawPoint {
     let id = id.clamp(1, p::ALL_POINTS);
     if height == Height::Mid && id > 35 {
         RawPoint::from_frame(&p::custom_point(id - 35, custom[(id - 36) as usize]))
     } else {
-        RawPoint::from_frame(&p::calibration(height, level)[(id - 1) as usize])
+        RawPoint::from_frame(&p::calibration(sport, height, level)[(id - 1) as usize])
     }
 }
 
@@ -1091,14 +1155,16 @@ fn current_point(id: u8, height: Height, level: u8, custom: &[CustomPoint; p::CU
 #[component]
 fn Advanced(
     ctx: Ctx,
+    sport: RwSignal<Sport>,
     status: RwSignal<Option<(u8, u8)>>,
     height: RwSignal<Height>,
     height_level: RwSignal<u8>,
     custom: RwSignal<[CustomPoint; p::CUSTOM_POINTS]>,
 ) -> impl IntoView {
     let connected = move || ctx.name.get().is_some();
-    let point = RwSignal::new(current_point(1, height.get_untracked(), height_level.get_untracked(), &custom.get_untracked()));
-    let load = move |id: u8| point.set(current_point(id, height.get_untracked(), height_level.get_untracked(), &custom.get_untracked()));
+    let current = move |id: u8| current_point(id, sport.get_untracked(), height.get_untracked(), height_level.get_untracked(), &custom.get_untracked());
+    let point = RwSignal::new(current(1));
+    let load = move |id: u8| point.set(current(id));
     let read = move |_| {
         status.set(None);
         ctx.run(vec![(0, p::read_value())]);
