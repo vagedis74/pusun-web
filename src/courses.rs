@@ -1,4 +1,4 @@
-//! Online courses ("教程" / CourseListActivity + CourseDetailActivity).
+//! Online courses ("Tutorials": CourseListActivity + CourseDetailActivity).
 //!
 //! The app fetches `https://app.api.pusuntech.com/TutorialBallWay/get` without
 //! authentication. Each course has a name, description, image, a list of videos and
@@ -42,6 +42,60 @@ pub struct Video {
     pub video_name: String,
     #[serde(default)]
     pub video: String,
+}
+
+/// Stroke and ball names used in Pusun's course texts.
+const TERMS: [(&str, &str); 14] = [
+    ("正手击球", "forehand"),
+    ("反手击球", "backhand"),
+    ("正手削球", "forehand slice"),
+    ("反手削球", "backhand slice"),
+    ("正手截击", "forehand volley"),
+    ("反手截击", "backhand volley"),
+    ("放小球", "drop shot"),
+    ("近距离击球", "close-range shots"),
+    ("中距离击球", "mid-range shots"),
+    ("远距离击球", "long-range shots"),
+    ("反弹球", "bouncing balls"),
+    ("凌空球", "balls out of the air"),
+    ("低球", "low balls"),
+    ("高球", "high balls"),
+];
+/// The coach's name (盖奥), romanized.
+const COACH: &str = "Gai Ao";
+
+fn term(zh: &str) -> Option<&'static str> {
+    TERMS.iter().find(|(z, _)| *z == zh).map(|(_, e)| *e)
+}
+
+fn capitalize(s: &str) -> String {
+    let mut c = s.chars();
+    c.next().map(|f| f.to_uppercase().chain(c).collect()).unwrap_or_default()
+}
+
+/// English for a course name, description or video title. Pusun writes them from a
+/// few templates; text that matches none of them is returned unchanged.
+pub fn translate(zh: &str) -> String {
+    let zh = zh.trim();
+    let t = |x: &str| term(x).map(capitalize);
+    if zh == "普尚机器进阶练习" {
+        return "Advanced practice with the Pusun machine".into();
+    }
+    if let Some(e) = zh.strip_prefix("盖奥-").and_then(t) {
+        return format!("{COACH}: {e}");
+    }
+    if let Some(e) = zh.strip_suffix("是常用的技术之一，课程细分为动作跟练，分解动作和击球进阶练习").and_then(t) {
+        return format!("The {} is one of the most used techniques. The course has a follow-along session, a step-by-step breakdown and advanced hitting practice.", e.to_lowercase());
+    }
+    if let Some(e) = zh.strip_prefix("盖奥进阶课程-实战中").and_then(|x| x.strip_suffix("的处理技巧和方法")).and_then(term) {
+        return format!("{COACH} advanced course: techniques for handling {e} in match play.");
+    }
+    for (suffix, label) in [("跟练", "follow-along"), ("分解动作", "step-by-step breakdown"), ("视频课程", "video lesson")] {
+        if let Some(e) = zh.strip_suffix(suffix).and_then(t) {
+            return format!("{e}: {label}");
+        }
+    }
+    zh.to_string()
 }
 
 impl Course {
@@ -107,7 +161,7 @@ pub fn Courses(on_practice: impl Fn(Vec<u8>) + Copy + Send + Sync + 'static) -> 
         <section>
             <h2>"Courses"</h2>
             <Show when=move || courses.get().is_none()>
-                <p class="hint">"Training videos and drills from Pusun's servers (text is in Chinese, as in the app)."</p>
+                <p class="hint">"Training videos and drills from Pusun's servers. Course texts are translated from Chinese; the videos keep their original audio."</p>
                 <button on:click=move |_| load() disabled=move || loading.get()>
                     {move || if loading.get() { "Loading…" } else { "Load courses" }}
                 </button>
@@ -123,8 +177,8 @@ pub fn Courses(on_practice: impl Fn(Vec<u8>) + Copy + Send + Sync + 'static) -> 
                             view! {
                                 <button class="course" on:click=move |_| show(pick.clone())>
                                     {c.image().map(|src| view! { <img src=src alt="" loading="lazy" /> })}
-                                    <span class="course-name">{c.dao_name.clone()}</span>
-                                    <small>{c.info.clone().unwrap_or_default()}</small>
+                                    <span class="course-name">{translate(&c.dao_name)}</span>
+                                    <small>{translate(c.info.as_deref().unwrap_or_default())}</small>
                                 </button>
                             }
                         }).collect_view()}
@@ -138,7 +192,7 @@ pub fn Courses(on_practice: impl Fn(Vec<u8>) + Copy + Send + Sync + 'static) -> 
                 view! {
                     <div class="course-detail">
                         <button on:click=move |_| open.set(None)>"← All courses"</button>
-                        <h3>{c.dao_name.clone()}</h3>
+                        <h3>{translate(&c.dao_name)}</h3>
                         <video controls playsinline preload="metadata" src=move || playing.get() poster=c.image()></video>
                         <div class="row">
                             {videos.into_iter().map(|v| {
@@ -146,11 +200,11 @@ pub fn Courses(on_practice: impl Fn(Vec<u8>) + Copy + Send + Sync + 'static) -> 
                                 let url2 = url.clone();
                                 view! {
                                     <button class="mode" class:selected=move || playing.get() == url
-                                        on:click=move |_| playing.set(url2.clone())>{v.video_name}</button>
+                                        on:click=move |_| playing.set(url2.clone())>{translate(&v.video_name)}</button>
                                 }
                             }).collect_view()}
                         </div>
-                        <p>{c.info.clone().unwrap_or_default()}</p>
+                        <p>{translate(c.info.as_deref().unwrap_or_default())}</p>
                         <p class="hint">{format!("Used {} times.", c.use_times)}</p>
                         <button class="primary" disabled=points.is_empty()
                             on:click=move |_| on_practice(points.clone())>"Practice in Vary Speed"</button>
@@ -177,8 +231,30 @@ mod tests {
             assert!(!c.points().is_empty(), "course {} has no drill points", c.id);
             assert!(c.tutorial_videos.iter().all(|v| v.video.starts_with("http")));
             assert!(c.image().is_some());
+            // Every text the page shows must come out in English.
+            let texts = [c.dao_name.clone(), c.info.clone().unwrap_or_default()].into_iter().chain(c.tutorial_videos.iter().map(|v| v.video_name.clone()));
+            for zh in texts {
+                let en = translate(&zh);
+                assert!(!en.chars().any(|ch| ('\u{4e00}'..='\u{9fff}').contains(&ch)), "untranslated: {zh} -> {en}");
+            }
         }
         println!("{} courses, {} videos", list.len(), list.iter().map(|c| c.tutorial_videos.len()).sum::<usize>());
+    }
+
+    #[test]
+    fn translates_course_templates() {
+        assert_eq!(translate("盖奥-正手削球"), "Gai Ao: Forehand slice");
+        assert_eq!(
+            translate("反手截击是常用的技术之一，课程细分为动作跟练，分解动作和击球进阶练习"),
+            "The backhand volley is one of the most used techniques. The course has a follow-along session, a step-by-step breakdown and advanced hitting practice."
+        );
+        assert_eq!(translate("盖奥进阶课程-实战中凌空球的处理技巧和方法"), "Gai Ao advanced course: techniques for handling balls out of the air in match play.");
+        assert_eq!(translate("放小球跟练"), "Drop shot: follow-along");
+        assert_eq!(translate("正手击球分解动作"), "Forehand: step-by-step breakdown");
+        assert_eq!(translate("远距离击球视频课程"), "Long-range shots: video lesson");
+        assert_eq!(translate("普尚机器进阶练习"), "Advanced practice with the Pusun machine");
+        // Unknown text is shown as is.
+        assert_eq!(translate("新课程"), "新课程");
     }
 
     #[test]
@@ -198,3 +274,4 @@ mod tests {
         assert_eq!(abs.image().as_deref(), Some("https://cdn/x.png"));
     }
 }
+

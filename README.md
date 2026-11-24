@@ -43,7 +43,8 @@ Web Bluetooth only works in **Chrome or Edge** (desktop or Android) on `https://
   speed, interval, spin; changes are sent live), optional pause before repeating
 - Saved routes (name, order, pause, shot settings) stored in the browser
 - AI Coach: random drills from first-ball side, level and ball count (2–9)
-- Courses: Pusun's online training courses with their videos; "Practice in Vary Speed"
+- Courses: Pusun's online training courses with their videos, with names, descriptions and
+  video titles translated from Chinese (by pattern, in `src/courses.rs`); "Practice in Vary Speed"
   loads the course's drill, like the app's Start button (works without a machine connected)
 - Tennis / Padel switch (the app's "Paddle Tennis" screen, `MainActivityPad2`), remembered
   in the browser. Padel uses its own speed table, mid court table (aims 600–700 higher) and

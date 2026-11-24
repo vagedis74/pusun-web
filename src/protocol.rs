@@ -279,7 +279,7 @@ impl RawPoint {
     }
 }
 
-/// `0x71`: hidden factory "read value" (读值) button. quirk: trailer 0x01.
+/// `0x71`: hidden factory "read value" button. quirk: trailer 0x01.
 /// The reply is presumably the `0x30` notification, which the app only logs.
 pub fn read_value() -> Frame {
     frame_raw(0x71, [0; 6], 0x01)
