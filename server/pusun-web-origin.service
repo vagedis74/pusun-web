@@ -1,0 +1,10 @@
+[Unit]
+Description=Pusun Web static site
+
+[Service]
+ExecStart=/usr/bin/python3 -I @REPO@/server/server.py 8917 %h/.local/share/pusun-web/site
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target

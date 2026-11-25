@@ -1,0 +1,12 @@
+[Unit]
+Description=Cloudflare Tunnel for Pusun Web
+Requires=pusun-web-origin.service
+After=pusun-web-origin.service
+
+[Service]
+ExecStart=/usr/local/bin/cloudflared tunnel --config /dev/null --no-autoupdate --protocol http2 run --token-file %h/.config/pusun-web/tunnel.token
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

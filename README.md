@@ -23,6 +23,13 @@ Live build: https://vagedis74.github.io/pusun-web/ (deployed by `.github/workflo
 push to `main` and weekly; GitHub Pages has no proxy, so the workflow saves the course list as
 `courses.json` at build time and Courses falls back to it).
 
+Self-hosted build: https://pusun.kingconfig.com, served from this machine through a Cloudflare
+Tunnel. `server/install.sh` installs two user services: `pusun-web-origin` runs `server/server.py`
+on `127.0.0.1:8917` (it marks HTML `no-cache` so phones pick up new builds), and
+`pusun-web-tunnel` runs `cloudflared` with the token in `~/.config/pusun-web/tunnel.token`
+(not in the repo). To publish a build: `trunk build --release && ./deploy.sh`. `deploy.sh`
+keeps the site folder's `courses.json`, a saved copy of the course list.
+
 Web Bluetooth only works in **Chrome or Edge** (desktop or Android) on `https://` or
 `http://localhost`. Safari and all iOS browsers do not support it. To use a phone, host
 `dist/` on any HTTPS static host.
