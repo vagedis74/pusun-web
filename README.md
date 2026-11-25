@@ -59,7 +59,9 @@ Web Bluetooth only works in **Chrome or Edge** (desktop or Android) on `https://
   Start plays one at once, Stop stops the machine, Edit opens it in Vary Speed to tune each ball
   first; the playing drill's card is outlined. Hovering over (or tapping) a drill's name shows a court with
   where to put the machine and where each player starts, and an animated yellow ball shows where
-  each ball lands, in order and for which player, while the players run to where they hit each one.
+  each ball lands, in order and for which player, while the players run to where they hit each one;
+  each hit shows the stroke (forehand, backhand, volley, swing volley, smash) and a dashed line to
+  where to play it.
   A 1–5 difficulty
   setting (remembered in the browser) applies to all drills: 3 plays them as written, and each step
   up feeds the next ball 0.5 s sooner and 3 speed units faster

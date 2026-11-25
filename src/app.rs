@@ -1082,7 +1082,7 @@ pub fn App() -> impl IntoView {
                                         <strong>{name}</strong>
                                         <span class="court-pop" role="tooltip">
                                             <b>{move || tr("Setup")}</b>
-                                            <span inner_html=drills::court_svg(d)></span>
+                                            <span inner_html=move || drills::court_svg(d, ui::dutch())></span>
                                             <span class="court-key"><i class="key-machine"></i>{move || tr("Pusun 9001 Pro, centre, about 1 m behind the baseline")}</span>
                                             <span class="court-key"><i class="key-p1">"1"</i>{move || tr(if d.doubles { "Player 1, first ball" } else { "Player, first ball" })}</span>
                                             {d.doubles.then(|| view! {

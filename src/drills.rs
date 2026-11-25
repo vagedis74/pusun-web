@@ -66,7 +66,7 @@ const HALF_SINGLES: f32 = 4.115;
 const SERVICE: f32 = 6.4;
 
 /// The court seen from above, machine side at the top, as an SVG document.
-pub fn court_svg(d: &Drill) -> String {
+pub fn court_svg(d: &Drill, dutch: bool) -> String {
     let line = |x1: f32, y1: f32, x2: f32, y2: f32| {
         format!(r#"<line x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}"/>"#)
     };
@@ -93,6 +93,8 @@ pub fn court_svg(d: &Drill) -> String {
     s += &ball_path(d);
     let timing = Timing::of(d);
     let who = receivers(d);
+    let shots = shots(d);
+    s += &return_path(&timing, &who, &shots, dutch);
     for (i, p) in d.players.iter().enumerate() {
         let fill = PLAYER_COLOURS[i.min(PLAYER_COLOURS.len() - 1)];
         // Keyframes (time, spot): start, then for each of this player's balls run from
@@ -100,10 +102,10 @@ pub fn court_svg(d: &Drill) -> String {
         let mut keys = vec![(0.0, *p)];
         let mut here = *p;
         let mut free = 0.0f32;
-        for (j, b) in d.balls.iter().enumerate().filter(|(j, _)| who[*j] == i) {
+        for j in (0..d.balls.len()).filter(|j| who[*j] == i) {
             let hit_at = timing.starts[j] + FLIGHT;
             let depart = (free + 0.15).min(hit_at - 0.4).max(keys.last().unwrap().0 + 0.01);
-            let spot = hit_spot(b);
+            let spot = shots[j].hit;
             keys.push((depart, here));
             keys.push((hit_at.max(depart + 0.01), spot));
             here = spot;
@@ -200,20 +202,120 @@ impl Timing {
     }
 }
 
-/// Roughly where the player hits ball `b`: low, firm balls are volleyed near the net,
-/// high balls (lobs, floaters, shoulder-high balls) are taken out of the air in front of
-/// where they would land, and everything else is played after the bounce, behind it.
-fn hit_spot(b: &Ball) -> Spot {
-    let l = landing(b.point);
-    let height = b.height.unwrap_or(2000);
-    let y = if height <= 1600 && b.speed > 0 {
-        2.5
-    } else if height >= 2500 {
-        (l.y - 2.0).max(2.0)
-    } else {
-        (l.y + 2.5).min(12.5)
-    };
-    at(l.x, y)
+/// How a ball is played. Drills may list these per ball; [`Stroke::Groundstroke`] and
+/// [`Stroke::Volley`] become forehand or backhand by where the ball comes.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Stroke {
+    Groundstroke,
+    Forehand,
+    /// Not used by the library yet; there for drills that need to force it.
+    #[allow(dead_code)]
+    Backhand,
+    Volley,
+    SwingVolley,
+    Smash,
+}
+
+/// What the animation shows for one ball: where it is hit, with which stroke, and where to.
+struct Shot {
+    hit: Spot,
+    /// English and Dutch name of the stroke.
+    name: (&'static str, &'static str),
+    /// Where to play it, in the far half (`y` negative, as drawn).
+    target: Spot,
+}
+
+/// Works out each ball's shot. Low, firm balls are volleyed near the net; high balls are
+/// smashed (lobs) or taken out of the air (floaters, shoulder-high balls) in front of where
+/// they would land; the rest are played after the bounce, behind it. Forehand or backhand
+/// assumes right-handers: a player on the left half takes balls up to the middle on the
+/// forehand, a player on the right half takes the middle on the backhand. Every shot goes
+/// crosscourt, deep from the baseline and angled from the net.
+fn shots(d: &Drill) -> Vec<Shot> {
+    let who = receivers(d);
+    d.balls
+        .iter()
+        .enumerate()
+        .map(|(j, b)| {
+            let l = landing(b.point);
+            let height = b.height.unwrap_or(2000);
+            let kind = d.strokes.get(j).copied().unwrap_or(if height <= 1600 && b.speed > 0 {
+                Stroke::Volley
+            } else if height >= 3500 {
+                Stroke::Smash
+            } else if height >= 2500 {
+                Stroke::SwingVolley
+            } else {
+                Stroke::Groundstroke
+            });
+            let (y, depth) = match kind {
+                Stroke::Volley => (2.5, -7.0),
+                Stroke::Smash | Stroke::SwingVolley => ((l.y - 2.0).max(2.0), -8.0),
+                _ => ((l.y + 2.5).min(12.5), -10.0),
+            };
+            let hit = at(l.x, y);
+            let start = d.players.get(who[j]).copied().unwrap_or(MACHINE);
+            let backhand_below = if start.x < -1.0 { -1.8 } else if start.x > 1.0 { 1.8 } else { -0.6 };
+            let backhand = hit.x < backhand_below;
+            let name = match kind {
+                Stroke::Forehand => ("Forehand", "Forehand"),
+                Stroke::Backhand => ("Backhand", "Backhand"),
+                Stroke::Groundstroke if backhand => ("Backhand", "Backhand"),
+                Stroke::Groundstroke => ("Forehand", "Forehand"),
+                Stroke::Volley if backhand => ("Backhand volley", "Backhandvolley"),
+                Stroke::Volley => ("Forehand volley", "Forehandvolley"),
+                Stroke::SwingVolley => ("Swing volley", "Swingvolley"),
+                Stroke::Smash => ("Smash", "Smash"),
+            };
+            let side = if hit.x.abs() > 0.5 { hit.x.signum() } else if start.x.abs() > 0.5 { start.x.signum() } else { 1.0 };
+            Shot { hit, name, target: at(-side * 3.0, depth) }
+        })
+        .collect()
+}
+
+/// Seconds the return line and the stroke name stay up after the hit.
+const RETURN_SHOWN: f32 = 1.4;
+/// Flight time of the return.
+const RETURN_FLIGHT: f32 = 0.6;
+
+/// For each ball, once it is hit: the stroke's name under the player and a ball in the
+/// player's colour flying along a dashed line to where it should go.
+fn return_path(timing: &Timing, who: &[usize], shots: &[Shot], dutch: bool) -> String {
+    let total = timing.total;
+    let k = |t: f32| format!("{:.4}", (t / total).clamp(0.0, 1.0));
+    let mut s = String::new();
+    for (j, shot) in shots.iter().enumerate() {
+        let colour = PLAYER_COLOURS[who[j].min(PLAYER_COLOURS.len() - 1)];
+        let hit_at = timing.starts[j] + FLIGHT;
+        let (h, t) = (shot.hit, shot.target);
+        let show = format!(
+            r##"<animate attributeName="opacity" dur="{total}s" repeatCount="indefinite" values="0;0;1;1;0;0" keyTimes="0;{};{};{};{};1"/>"##,
+            k(hit_at - 0.25),
+            k(hit_at - 0.24),
+            k(hit_at + RETURN_SHOWN),
+            k(hit_at + RETURN_SHOWN + 0.01)
+        );
+        s += &format!(
+            r##"<line x1="{}" y1="{}" x2="{}" y2="{}" stroke="{colour}" stroke-width=".14" stroke-dasharray=".35 .2" opacity="0">{show}</line>"##,
+            h.x, h.y, t.x, t.y
+        );
+        s += &format!(
+            r##"<circle r=".26" fill="{colour}" stroke="#fff" stroke-width=".06" opacity="0" cx="{hx}" cy="{hy}"><animate attributeName="cx" dur="{total}s" repeatCount="indefinite" values="{hx};{hx};{tx};{tx}" keyTimes="0;{a};{b};1"/><animate attributeName="cy" dur="{total}s" repeatCount="indefinite" values="{hy};{hy};{ty};{ty}" keyTimes="0;{a};{b};1"/>{show}</circle>"##,
+            hx = h.x,
+            hy = h.y,
+            tx = t.x,
+            ty = t.y,
+            a = k(hit_at),
+            b = k(hit_at + RETURN_FLIGHT),
+        );
+        s += &format!(
+            r##"<text x="{}" y="{}" font-size=".8" font-family="system-ui,sans-serif" font-weight="700" fill="#fff" stroke="#000" stroke-width=".18" paint-order="stroke" text-anchor="middle" opacity="0">{}{show}</text>"##,
+            h.x.clamp(-3.8, 3.8),
+            (h.y + 1.3).min(14.5),
+            if dutch { shot.name.1 } else { shot.name.0 }
+        );
+    }
+    s
 }
 
 fn ball_path(d: &Drill) -> String {
@@ -274,6 +376,9 @@ pub struct Drill {
     /// Which player (index into `players`) takes each ball; empty to work it out from
     /// where the balls land (see [`receivers`]).
     receivers: &'static [usize],
+    /// The stroke for each ball; empty to work it out from each ball's height and speed
+    /// and where it lands (see [`shots`]).
+    strokes: &'static [Stroke],
 }
 
 impl Drill {
@@ -323,6 +428,7 @@ pub const LIBRARY: &[Drill] = &[
         machine: MACHINE,
         players: &[at(0.0, 12.5)],
         receivers: &[],
+        strokes: &[],
         balls: &[ball(17, 50), ball(19, 50)],
     },
     Drill {
@@ -338,6 +444,7 @@ pub const LIBRARY: &[Drill] = &[
         machine: MACHINE,
         players: &[at(0.0, 12.5)],
         receivers: &[],
+        strokes: &[],
         balls: &[shaped(23, 2000, 0, 40, 2), shaped(27, 2000, 0, 40, 2)],
     },
     Drill {
@@ -353,6 +460,7 @@ pub const LIBRARY: &[Drill] = &[
         machine: MACHINE,
         players: &[at(0.0, 12.5)],
         receivers: &[],
+        strokes: &[],
         balls: &[shaped(22, 2000, 0, 35, 1), shaped(28, 2000, 0, 35, 1)],
     },
     Drill {
@@ -368,6 +476,7 @@ pub const LIBRARY: &[Drill] = &[
         machine: MACHINE,
         players: &[at(0.0, 12.5)],
         receivers: &[],
+        strokes: &[Stroke::Forehand, Stroke::Forehand, Stroke::Forehand],
         balls: &[ball(24, 45), ball(24, 45), ball(28, 45)],
     },
     Drill {
@@ -383,6 +492,7 @@ pub const LIBRARY: &[Drill] = &[
         machine: MACHINE,
         players: &[at(0.0, 12.5)],
         receivers: &[],
+        strokes: &[],
         balls: &[shaped(4, 2000, 0, 50, -3), shaped(16, 1500, 10, 30, 0), shaped(20, 1500, 10, 30, 0)],
     },
     Drill {
@@ -398,6 +508,7 @@ pub const LIBRARY: &[Drill] = &[
         machine: MACHINE,
         players: &[at(0.0, 12.5)],
         receivers: &[],
+        strokes: &[],
         balls: &[
             shaped(25, 2000, 0, 40, 1),
             shaped(13, 2000, -4, 35, 0),
@@ -418,6 +529,7 @@ pub const LIBRARY: &[Drill] = &[
         machine: MACHINE,
         players: &[at(0.0, 6.4)],
         receivers: &[],
+        strokes: &[],
         balls: &[
             shaped(2, 1500, -20, 30, -3),
             shaped(9, 1500, 5, 35, 0),
@@ -438,6 +550,7 @@ pub const LIBRARY: &[Drill] = &[
         machine: MACHINE,
         players: &[at(0.0, 3.0)],
         receivers: &[],
+        strokes: &[],
         balls: &[shaped(10, 4000, -6, 60, 0), shaped(12, 4000, -6, 60, 0)],
     },
     Drill {
@@ -453,6 +566,7 @@ pub const LIBRARY: &[Drill] = &[
         machine: MACHINE,
         players: &[at(0.0, 13.0)],
         receivers: &[],
+        strokes: &[],
         balls: &[shaped(22, 2600, 0, 45, 5), shaped(25, 2600, 0, 45, 5), shaped(28, 2600, 0, 45, 5)],
     },
     Drill {
@@ -468,6 +582,7 @@ pub const LIBRARY: &[Drill] = &[
         machine: MACHINE,
         players: &[at(0.0, 12.5)],
         receivers: &[],
+        strokes: &[],
         balls: &[shaped(9, 1600, 0, 45, -4), shaped(13, 1600, 0, 45, -4)],
     },
     Drill {
@@ -483,6 +598,7 @@ pub const LIBRARY: &[Drill] = &[
         machine: MACHINE,
         players: &[at(0.0, 12.5)],
         receivers: &[],
+        strokes: &[],
         balls: &[ball(22, 40), ball(4, 40), ball(28, 40), ball(4, 40)],
     },
     Drill {
@@ -498,6 +614,7 @@ pub const LIBRARY: &[Drill] = &[
         machine: MACHINE,
         players: &[at(0.0, 12.5)],
         receivers: &[],
+        strokes: &[],
         balls: &[
             shaped(22, 2000, 5, 30, 1),
             shaped(26, 2000, 5, 30, 1),
@@ -521,6 +638,7 @@ pub const LIBRARY: &[Drill] = &[
         machine: MACHINE,
         players: &[at(-2.7, 12.5), at(2.7, 12.5)],
         receivers: &[],
+        strokes: &[],
         balls: &[shaped(16, 2000, -6, 50, 0), shaped(20, 2000, -6, 50, 0)],
     },
     Drill {
@@ -536,6 +654,7 @@ pub const LIBRARY: &[Drill] = &[
         machine: MACHINE,
         players: &[at(-2.7, 12.5), at(2.7, 12.5)],
         receivers: &[],
+        strokes: &[],
         balls: &[ball(25, 50), ball(18, 50)],
     },
     Drill {
@@ -551,6 +670,7 @@ pub const LIBRARY: &[Drill] = &[
         machine: MACHINE,
         players: &[at(2.7, 12.5), at(-2.7, 12.5)],
         receivers: &[],
+        strokes: &[],
         balls: &[shaped(27, 2000, 0, 40, 1), shaped(23, 2000, 0, 40, 1)],
     },
     Drill {
@@ -566,6 +686,7 @@ pub const LIBRARY: &[Drill] = &[
         machine: MACHINE,
         players: &[at(2.7, 12.5), at(-2.7, 3.0)],
         receivers: &[],
+        strokes: &[],
         balls: &[shaped(27, 2000, 0, 35, 1), shaped(16, 1500, 10, 40, 0)],
     },
     Drill {
@@ -581,6 +702,7 @@ pub const LIBRARY: &[Drill] = &[
         machine: MACHINE,
         players: &[at(-2.7, 3.0), at(2.7, 12.5)],
         receivers: &[0, 1],
+        strokes: &[],
         balls: &[shaped(18, 1500, 10, 40, 0), shaped(22, 2000, 0, 45, 1)],
     },
     Drill {
@@ -596,6 +718,7 @@ pub const LIBRARY: &[Drill] = &[
         machine: MACHINE,
         players: &[at(-2.7, 3.0), at(2.7, 3.0)],
         receivers: &[],
+        strokes: &[],
         balls: &[
             shaped(16, 1500, 10, 25, 0),
             shaped(18, 1500, 10, 25, 0),
@@ -616,6 +739,7 @@ pub const LIBRARY: &[Drill] = &[
         machine: MACHINE,
         players: &[at(2.7, 12.5), at(-2.7, 12.5)],
         receivers: &[],
+        strokes: &[],
         balls: &[
             shaped(27, 2000, 0, 50, 1),
             shaped(18, 1500, 5, 40, 0),
@@ -638,6 +762,7 @@ pub const LIBRARY: &[Drill] = &[
         machine: MACHINE,
         players: &[at(-2.7, 12.5), at(2.7, 12.5)],
         receivers: &[],
+        strokes: &[],
         balls: &[
             shaped(11, 2000, -6, 35, -2),
             shaped(20, 1500, 5, 30, 0),
@@ -658,6 +783,7 @@ pub const LIBRARY: &[Drill] = &[
         machine: MACHINE,
         players: &[at(-2.7, 12.5), at(2.7, 12.5)],
         receivers: &[],
+        strokes: &[],
         balls: &[
             shaped(23, 2000, 0, 40, 1),
             shaped(17, 2000, -4, 35, 0),
@@ -679,7 +805,8 @@ pub const LIBRARY: &[Drill] = &[
         pause: DrillPause::Short,
         machine: MACHINE,
         players: &[at(-2.7, 3.0), at(2.7, 3.0)],
-        receivers: &[],
+        receivers: &[1, 0],
+        strokes: &[Stroke::Groundstroke, Stroke::Groundstroke],
         balls: &[shaped(23, 3800, -10, 60, 0), shaped(27, 3800, -10, 60, 0)],
     },
 ];
@@ -745,6 +872,7 @@ mod tests {
             assert_eq!(d.players.len(), if d.doubles { 2 } else { 1 }, "{}: players", d.key);
             assert!(d.receivers.is_empty() || d.receivers.len() == d.balls.len(), "{}: receivers", d.key);
             assert!(d.receivers.iter().all(|&r| r < d.players.len()), "{}: receivers", d.key);
+            assert!(d.strokes.is_empty() || d.strokes.len() == d.balls.len(), "{}: strokes", d.key);
             for p in d.players.iter().chain([&d.machine]) {
                 assert!(p.x.abs() <= HALF_DOUBLES && (0.0..=14.0).contains(&p.y), "{}: {p:?}", d.key);
             }
@@ -754,7 +882,7 @@ mod tests {
     #[test]
     fn animations_are_well_formed() {
         for d in LIBRARY {
-            let svg = court_svg(d);
+            let svg = court_svg(d, false) + &court_svg(d, true);
             for part in svg.split("keyTimes=\"").skip(1) {
                 let times: Vec<f32> =
                     part.split('"').next().unwrap().split(';').map(|t| t.parse().unwrap()).collect();
