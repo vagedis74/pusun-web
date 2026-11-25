@@ -181,6 +181,23 @@ pub const LIBRARY: &[Drill] = &[
         ],
     },
     Drill {
+        key: "janny",
+        name: ("Janny drill", "Janny-drill"),
+        description: (
+            "Play close to the net. A very short ball on the left: run in and play it before it bounces twice, then volley the next ball on the left right at the net. Then the same on the right: a very short ball, followed by a volley close to the net.",
+            "Speel dicht bij het net. Een heel korte bal links: ren erop af en speel hem voordat hij twee keer stuit, volleer dan de volgende bal links vlak bij het net. Daarna hetzelfde rechts: een heel korte bal, gevolgd door een volley dicht op het net.",
+        ),
+        level: Level::Intermediate,
+        doubles: false,
+        pause: DrillPause::Short,
+        balls: &[
+            shaped(2, 1500, -20, 30, -3),
+            shaped(9, 1500, 5, 35, 0),
+            shaped(6, 1500, -20, 30, -3),
+            shaped(13, 1500, 5, 35, 0),
+        ],
+    },
+    Drill {
         key: "lobsmash",
         name: ("Lob and smash", "Lob en smash"),
         description: (

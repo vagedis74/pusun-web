@@ -53,7 +53,7 @@ Web Bluetooth only works in **Chrome or Edge** (desktop or Android) on `https://
 - Vary Speed drills: up to 15 shots on a 7×4 target grid, each shot tunable (aim, height,
   speed, interval, spin; changes are sent live), optional pause before repeating
 - Saved routes (name, order, pause, shot settings) stored in the browser
-- Drills (tennis): a built-in library (`src/drills.rs`) of eleven singles drills, from a beginner
+- Drills (tennis): a built-in library (`src/drills.rs`) of twelve singles drills, from a beginner
   warm-up to pressure feeding, and nine doubles drills for a pair (warm-up, middle balls, crosscourt,
   one up one back, poaching, both at the net, turbo doubles, storm the net, lob and switch), each with a level and description;
   Start plays one at once, Stop stops the machine, Edit opens it in Vary Speed to tune each ball
