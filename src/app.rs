@@ -276,6 +276,7 @@ impl Ctx {
                 }
                 ctx.push_log(format!("TX {}", p::hex(&f)));
                 if let Err(e) = m.send(&f).await {
+                    ctx.push_log(format!("Write failed: {e}"));
                     ctx.error.set(Some(format!("Write failed: {e}")));
                     return;
                 }

@@ -41,6 +41,9 @@ fn js_err(e: JsValue) -> String {
 const CONNECT_ATTEMPTS: u32 = 3;
 const CONNECT_TIMEOUT_MS: u32 = 15_000;
 const NOTIFY_TIMEOUT_MS: u32 = 4_000;
+/// A write that has not settled by then is reported as failed instead of blocking
+/// every later write (they are serialized).
+const WRITE_TIMEOUT_MS: u32 = 3_000;
 
 /// Connects GATT and looks up the write and notify characteristics.
 async fn open_gatt(
@@ -72,12 +75,24 @@ async fn open_gatt(
     Ok((write, notify))
 }
 
+/// Awaits a write, giving up after [`WRITE_TIMEOUT_MS`].
+async fn with_timeout<T>(p: impl std::future::IntoFuture<Output = Result<T, JsValue>>) -> Result<(), String> {
+    let write = p.into_future().map(|r| r.map(|_| ()).map_err(js_err));
+    let timeout = TimeoutFuture::new(WRITE_TIMEOUT_MS)
+        .map(|_| Err(format!("no reply from the machine within {} s", WRITE_TIMEOUT_MS / 1000)));
+    futures::select! {
+        r = write.fuse() => r,
+        r = timeout.fuse() => r,
+    }
+}
+
 pub struct Machine {
     pub name: String,
     device: BluetoothDevice,
     write: BluetoothRemoteGattCharacteristic,
     lock: Mutex<()>,
     with_response: Cell<bool>,
+    can_write_without_response: bool,
     _on_notify: Closure<dyn FnMut(web_sys::Event)>,
     _on_disconnect: Closure<dyn FnMut(web_sys::Event)>,
 }
@@ -171,6 +186,16 @@ impl Machine {
         };
         log(line);
 
+        // Prefer writes without response: some machines never confirm a write with
+        // response on Android, which used to leave every later command waiting.
+        let props = write.properties();
+        let (with, without) = (props.write(), props.write_without_response());
+        log(format!(
+            "Write supports: with response {}, without response {}",
+            if with { "yes" } else { "no" },
+            if without { "yes" } else { "no" }
+        ));
+
         let on_disconnect = Closure::<dyn FnMut(web_sys::Event)>::new(move |_| on_disconnect());
         device.set_ongattserverdisconnected(Some(on_disconnect.as_ref().unchecked_ref()));
 
@@ -179,7 +204,8 @@ impl Machine {
             device,
             write,
             lock: Mutex::new(()),
-            with_response: Cell::new(true),
+            with_response: Cell::new(!without),
+            can_write_without_response: without,
             _on_notify: on_notify,
             _on_disconnect: on_disconnect,
         }))
@@ -189,19 +215,24 @@ impl Machine {
     pub async fn send(&self, f: &Frame) -> Result<(), String> {
         let _guard = self.lock.lock().await;
         if self.with_response.get() {
-            match self.write.write_value_with_response_with_u8_slice(f) {
-                Ok(p) => match p.await {
-                    Ok(_) => return Ok(()),
-                    Err(e) if js_err(e.clone()).contains("not supported") => self.with_response.set(false),
-                    Err(e) => return Err(js_err(e)),
-                },
-                Err(_) => self.with_response.set(false),
+            let result = match self.write.write_value_with_response_with_u8_slice(f) {
+                Ok(p) => with_timeout(p).await,
+                Err(e) => Err(js_err(e)),
+            };
+            match result {
+                Ok(()) => return Ok(()),
+                Err(e) if self.can_write_without_response => {
+                    // Retry this frame without response and keep using that from now on.
+                    self.with_response.set(false);
+                    let p = self.write.write_value_without_response_with_u8_slice(f).map_err(js_err)?;
+                    return with_timeout(p).await.map_err(|e2| format!("{e}; without response: {e2}"));
+                }
+                Err(e) => return Err(e),
             }
         }
         let p = self.write.write_value_without_response_with_u8_slice(f).map_err(js_err)?;
-        p.await.map(|_| ()).map_err(js_err)
+        with_timeout(p).await
     }
-
 
     pub fn disconnect(&self) {
         if let Some(s) = self.device.gatt() {
