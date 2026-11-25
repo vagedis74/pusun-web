@@ -1078,7 +1078,10 @@ pub fn App() -> impl IntoView {
                             <article class="drill" id=format!("drill-{}", d.key)
                                 class:playing=move || running.get() && active_drill.get() == Some(d.key)>
                                 <div class="drill-head">
-                                    <span class="drill-name" tabindex="0">
+                                    <span class="drill-name" tabindex="0"
+                                        on:mouseenter=move |e| restart_animation(&e)
+                                        on:focusin=move |e| restart_animation(&e)
+                                        on:click=move |e| restart_on_name_tap(&e)>
                                         <strong>{name}</strong>
                                         <span class="court-pop" role="tooltip">
                                             <b>{move || tr("Setup")}</b>
@@ -1391,5 +1394,32 @@ fn Advanced(
                 <span class="with-help"><button class="primary" on:click=write>{move || tr("Write point")}</button><Help topic="Write point" /></span>
             </div>
         </section>
+    }
+}
+
+/// Rewinds the court animation inside the event's target, so the setup popup always
+/// plays its drill from the first ball. The popup's SVG keeps running while hidden.
+fn restart_animation(e: &web_sys::Event) {
+    use wasm_bindgen::JsCast;
+    let Some(el) = e.current_target().and_then(|t| t.dyn_into::<web_sys::Element>().ok()) else { return };
+    let Ok(Some(svg)) = el.query_selector("svg") else { return };
+    if let Ok(f) = js_sys::Reflect::get(&svg, &"setCurrentTime".into()) {
+        if let Some(f) = f.dyn_ref::<js_sys::Function>() {
+            let _ = f.call1(&svg, &0.into());
+        }
+    }
+}
+
+/// A second tap on the name of an open setup popup restarts it too; taps inside the
+/// popup leave it running.
+fn restart_on_name_tap(e: &web_sys::Event) {
+    use wasm_bindgen::JsCast;
+    let in_popup = e
+        .target()
+        .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
+        .and_then(|el| el.closest(".court-pop").ok().flatten())
+        .is_some();
+    if !in_popup {
+        restart_animation(e);
     }
 }
