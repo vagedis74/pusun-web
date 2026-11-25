@@ -1,3 +1,4 @@
+use crate::ui::{self, Help, tr};
 use std::rc::Rc;
 
 use gloo_timers::future::TimeoutFuture;
@@ -312,6 +313,7 @@ fn table_steps(frames: Vec<Frame>, first_delay: u32) -> Vec<Step> {
 
 #[component]
 pub fn App() -> impl IntoView {
+    let dutch = ui::language();
     let ctx = Ctx {
         machine: StoredValue::new_local(None),
         name: RwSignal::new(None),
@@ -759,69 +761,77 @@ pub fn App() -> impl IntoView {
 
     view! {
         <header>
-            <h1>"PT-9001 control"</h1>
+            <h1>{move || tr("PT-9001 control")}</h1>
+            <label class="language">
+                <span>{move || tr("Language")}</span>
+                <select prop:value=move || if dutch.get() { "nl" } else { "en" }
+                    on:change=move |ev| dutch.set(event_target_value(&ev) == "nl")>
+                    <option value="en">"English"</option>
+                    <option value="nl">"Nederlands"</option>
+                </select>
+            </label>
             <div class="sport" role="group" aria-label="Sport">
-                <button class="mode" class:selected=move || !padel() on:click=move |_| switch_sport(Sport::Tennis)>"Tennis"</button>
-                <button class="mode" class:selected=padel on:click=move |_| switch_sport(Sport::Padel)>"Padel"</button>
+                <span class="with-help"><button class="mode" class:selected=move || !padel() on:click=move |_| switch_sport(Sport::Tennis)>"Tennis"</button><Help topic="Tennis" /></span>
+                <span class="with-help"><button class="mode" class:selected=padel on:click=move |_| switch_sport(Sport::Padel)>"Padel"</button><Help topic="Padel" /></span>
             </div>
             <Show
                 when=connected
                 fallback=move || view! {
-                    <button class="primary" on:click=connect disabled=move || connecting.get()>
-                        {move || if connecting.get() { "Connecting…" } else { "Connect machine" }}
-                    </button>
+                    <span class="with-help"><button class="primary" on:click=connect disabled=move || connecting.get()>
+                        {move || if connecting.get() { tr("Connecting…") } else { tr("Connect machine") }}
+                    </button><Help topic="Connect machine" /></span>
                 }
             >
                 <span class="device">{move || ctx.name.get()}</span>
                 <span class="battery">
                     {move || match battery.get() {
-                        Some(v) => format!("Battery {} ({v})", "▮".repeat(p::battery_bars(v) as usize) + &"▯".repeat(4 - p::battery_bars(v) as usize)),
-                        None => "Battery –".into(),
+                        Some(v) => format!("{} {} ({v})", tr("Battery"), "▮".repeat(p::battery_bars(v) as usize) + &"▯".repeat(4 - p::battery_bars(v) as usize)),
+                        None => format!("{} –", tr("Battery")),
                     }}
                 </span>
-                <button on:click=move |_| ctx.run(vec![(0, p::battery_query())])>"↻"</button>
-                <button on:click=disconnect>"Disconnect"</button>
+                <span class="with-help"><button on:click=move |_| ctx.run(vec![(0, p::battery_query())])>"↻"</button><Help topic="↻" /></span>
+                <span class="with-help"><button on:click=disconnect>{move || tr("Disconnect")}</button><Help topic="Disconnect" /></span>
             </Show>
         </header>
 
         <Show when=move || ctx.error.get().is_some()>
-            <p class="error">{move || ctx.error.get()} " " <button on:click=move |_| ctx.error.set(None)>"Dismiss"</button></p>
+            <div class="error">{move || ctx.error.get().map(|msg| ui::message(&msg))} " " <span class="with-help"><button on:click=move |_| ctx.error.set(None)>{move || tr("Dismiss")}</button><Help topic="Dismiss" /></span></div>
         </Show>
         <Show when=pt7_padel>
-            <p class="error">"This machine's name starts with PT7. The official app sends nothing to PT7 machines from its padel screen, so padel mode may not be supported on this model. Untested."</p>
+            <p class="error">{move || tr("This machine's name starts with PT7. The official app sends nothing to PT7 machines from its padel screen, so padel mode may not be supported on this model. Untested.")}</p>
         </Show>
         <Show when=move || fault.get().is_some()>
-            <p class="fault">{move || fault.get()} " " <button on:click=move |_| fault.set(None)>"Dismiss"</button></p>
+            <div class="fault">{move || fault.get().map(|msg| ui::message(&msg))} " " <span class="with-help"><button on:click=move |_| fault.set(None)>{move || tr("Dismiss")}</button><Help topic="Dismiss" /></span></div>
         </Show>
 
         <main class:disabled=move || !connected()>
             <section class="sticky">
                 <div class="run">
-                    <span class="current">{move || pattern.get().name()}</span>
+                    <span class="current">{move || pattern_name(&pattern.get())}</span>
                     <Show when=move || default_key(sport.get(), &pattern.get()).is_some()>
-                        <button class:dirty=default_dirty on:click=save_default
-                            title="Save the current aim, speed, frequency, spin and height as this pattern's default">"Save default"</button>
+                        <span class="with-help"><button class:dirty=default_dirty on:click=save_default
+                            title=move || tr("Save the current aim, speed, frequency, spin and height as this pattern's default")>{move || tr("Save default")}</button><Help topic="Save default" /></span>
                         <Show when=move || saved_default().is_some()>
-                            <button on:click=forget_default title="Remove this pattern's saved default">"✕"</button>
+                            <span class="with-help"><button on:click=forget_default title=move || tr("Remove this pattern's saved default")>"✕"</button><Help topic="✕" /></span>
                         </Show>
                     </Show>
-                    <button class="primary" on:click=move |_| start() disabled=move || running.get()>"Start"</button>
-                    <button class="stop" on:click=move |_| stop()>"Stop"</button>
+                    <span class="with-help"><button class="primary" on:click=move |_| start() disabled=move || running.get()>{move || tr("Start")}</button><Help topic="Start" /></span>
+                    <span class="with-help"><button class="stop" on:click=move |_| stop()>{move || tr("Stop")}</button><Help topic="Stop" /></span>
                 </div>
                 <Show when=move || notice.get().is_some()>
-                    <p class="hint">{move || notice.get()}</p>
+                    <p class="hint">{move || notice.get().map(|msg| tr(&msg).to_owned())}</p>
                 </Show>
             </section>
 
             <section>
-                <h2>"Shot"</h2>
+                <h2>{move || tr("Shot")}</h2>
                 <Slider label="Speed" min=1 max=13 value=speed on_commit=send_speed />
                 <Slider label="Frequency" min=1 max=10 value=freq on_commit=send_freq />
                 <Slider label="Spin (− back / + top)" min=-6 max=6 value=spin on_commit=send_spin />
                 <label>
-                    <span>"Aim " {move || {
+                    <span>{move || tr("Aim ")} {move || {
                         let v = lr.get();
-                        if v > 1140 { "left" } else if v < 1140 { "right" } else { "center" }
+                        if v > 1140 { tr("left") } else if v < 1140 { tr("right") } else { tr("center") }
                     }} " (" {move || lr.get()} ")"</span>
                     <input type="range" min=p::LR_MIN max=p::LR_MAX step="10"
                         prop:value=move || p::LR_MAX + p::LR_MIN - lr.get()
@@ -829,27 +839,27 @@ pub fn App() -> impl IntoView {
                         on:change=move |_| send_position() />
                 </label>
                 <label>
-                    <span>"Height " {move || ud.get().min(ud_cap())}</span>
+                    <span>{move || tr("Height ")} {move || ud.get().min(ud_cap())}</span>
                     <input type="range" min="0" max=move || ud_cap() step="100"
                         prop:value=move || ud.get().min(ud_cap())
                         on:input=move |ev| ud.set(event_target_value(&ev).parse().unwrap_or(0))
                         on:change=move |_| send_position() />
                 </label>
                 <div class="row">
-                    <span>"Court height"</span>
+                    <span>{move || tr("Court height")}</span>
                     {[(Height::Low, "Low"), (Height::Mid, "Mid"), (Height::High, "High")].into_iter().map(|(h, l)| view! {
-                        <button class="mode" class:selected=move || height.get() == h on:click=move |_| set_height(h)>{l}</button>
+                        <span class="with-help"><button class="mode" class:selected=move || height.get() == h on:click=move |_| set_height(h)>{move || tr(l)}</button><Help topic={match l { "Low" => "Court Low", "Mid" => "Court Mid", _ => "Court High" }} /></span>
                     }).collect_view()}
                     <Show when=move || height.get() == Height::Mid>
-                        <button on:click=move |_| change_level(-1)>"−"</button>
+                        <span class="with-help"><button on:click=move |_| change_level(-1)>"−"</button><Help topic="Height −" /></span>
                         <span class="value">{move || height_level.get()}</span>
-                        <button on:click=move |_| change_level(1)>"+"</button>
+                        <span class="with-help"><button on:click=move |_| change_level(1)>"+"</button><Help topic="Height +" /></span>
                     </Show>
                 </div>
             </section>
 
             <section>
-                <h2>"Patterns"</h2>
+                <h2>{move || tr("Patterns")}</h2>
                 <PatternGroup title="Basics" pattern=pattern select=select options=vec![
                     Pattern::Fixed(1), Pattern::Fixed(2), Pattern::Fixed(3), Pattern::Random,
                     Pattern::Primary, Pattern::Smash, Pattern::Moon,
@@ -866,7 +876,7 @@ pub fn App() -> impl IntoView {
                 <PatternGroup title="Your own" pattern=pattern select=select options=vec![Pattern::Program(vec![]), Pattern::Custom(vec![])] />
 
                 <Show when=is_program>
-                    <p class="hint">"Tap court points in play order (max " {p::MAX_SEQUENCE} "). Far side is at the top. 36–41 are your custom points."</p>
+                    <p class="hint">{move || tr("Tap court points in play order (max ")} {p::MAX_SEQUENCE} "). Far side is at the top. 36–41 are your custom points."</p>
                     <div class="court">
                         {(0..5u8).rev().map(|row| view! {
                             <div class="court-row">
@@ -878,18 +888,18 @@ pub fn App() -> impl IntoView {
                         </div>
                     </div>
                     <div class="run">
-                        <button on:click=move |_| program.update(|d| { d.pop(); })>"Undo"</button>
-                        <button on:click=move |_| program.set(Vec::new())>"Clear"</button>
+                        <span class="with-help"><button on:click=move |_| program.update(|d| { d.pop(); })>{move || tr("Undo")}</button><Help topic="Undo" /></span>
+                        <span class="with-help"><button on:click=move |_| program.set(Vec::new())>{move || tr("Clear")}</button><Help topic="Clear" /></span>
                     </div>
                     <SavedList title="Saved programs" noun="program" names=program_names can_save=Signal::derive(move || !program.get().is_empty())
                         on_load=load_program on_delete=delete_program on_save=save_program />
                 </Show>
 
                 <Show when=is_custom>
-                    <p class="hint">"Edit a point (changes are sent to the machine and saved in this browser), then tap points in play order."</p>
+                    <p class="hint">{move || tr("Edit a point (changes are sent to the machine and saved in this browser), then tap points in play order.")}</p>
                     <div class="row">
                         {(1..=6u8).map(|n| view! {
-                            <button class="mode" class:selected=move || editing.get() == n on:click=move |_| editing.set(n)>{format!("Point {n}")}</button>
+                            <span class="with-help"><button class="mode" class:selected=move || editing.get() == n on:click=move |_| editing.set(n)>{move || format!("{} {n}", tr("Point"))}</button><Help topic="Edit point" /></span>
                         }).collect_view()}
                     </div>
                     {move || {
@@ -913,18 +923,18 @@ pub fn App() -> impl IntoView {
                         }
                     }}
                     <div class="row">
-                        <span>"Play order:"</span>
+                        <span>{move || tr("Play order:")}</span>
                         {(1..=6u8).map(|id| view! { <PointButton id=id list=custom_seq max=p::MAX_SEQUENCE /> }).collect_view()}
                     </div>
                     <div class="run">
-                        <button on:click=move |_| custom_seq.update(|d| { d.pop(); })>"Undo"</button>
-                        <button on:click=move |_| custom_seq.set(Vec::new())>"Clear"</button>
-                        <button on:click=move |_| {
+                        <span class="with-help"><button on:click=move |_| custom_seq.update(|d| { d.pop(); })>{move || tr("Undo")}</button><Help topic="Undo" /></span>
+                        <span class="with-help"><button on:click=move |_| custom_seq.set(Vec::new())>{move || tr("Clear")}</button><Help topic="Clear" /></span>
+                        <span class="with-help"><button on:click=move |_| {
                             let d = CustomPoint::defaults(sport.get_untracked());
                             custom.set(d);
                             save_custom(sport.get_untracked(), &d);
                             ctx.run(d.iter().enumerate().map(|(i, c)| (10, p::custom_point(i as u8 + 1, *c))).chain([(50, p::apply())]).collect());
-                        }>"Reset points"</button>
+                        }>{move || tr("Reset points")}</button><Help topic="Reset points" /></span>
                     </div>
                     <SavedList title="Saved point sets" noun="point set" names=custom_set_names can_save=Signal::derive(|| true)
                         on_load=load_custom_set on_delete=delete_custom_set on_save=save_custom_set />
@@ -932,8 +942,8 @@ pub fn App() -> impl IntoView {
             </section>
 
             <section id="vary-speed" style:display=move || if padel() { "none" } else { "" }>
-                <h2>"Vary Speed"</h2>
-                <p class="hint">"Tap targets in play order (max " {p::MAX_DRILL_SHOTS} "), far side at the top. Each shot can be tuned below; settings belong to the point, so a repeated point plays the same."</p>
+                <h2>{move || tr("Vary Speed")}</h2>
+                <p class="hint">{move || tr("Tap targets in play order (max ")} {p::MAX_DRILL_SHOTS} "), far side at the top. Each shot can be tuned below; settings belong to the point, so a repeated point plays the same."</p>
                 <div class="court">
                     {(0..4u8).rev().map(|row| view! {
                         <div class="court-row">
@@ -944,13 +954,13 @@ pub fn App() -> impl IntoView {
                 <div class="run">
                     <select prop:value=move || match pause.get() { DrillPause::None => "none", DrillPause::Short => "short", DrillPause::Long => "long" }
                         on:change=move |ev| pause.set(pause_from(&event_target_value(&ev)))>
-                        <option value="none">"No pause"</option>
-                        <option value="short">"Short pause"</option>
-                        <option value="long">"Long pause"</option>
+                        <option value="none">{move || tr("No pause")}</option>
+                        <option value="short">{move || tr("Short pause")}</option>
+                        <option value="long">{move || tr("Long pause")}</option>
                     </select>
-                    <button on:click=move |_| drill.update(|d| { d.pop(); })>"Undo"</button>
-                    <button on:click=move |_| drill.set(Vec::new())>"Clear"</button>
-                    <button class="primary" on:click=start_drill disabled=move || drill.get().is_empty()>"Start drill"</button>
+                    <span class="with-help"><button on:click=move |_| drill.update(|d| { d.pop(); })>{move || tr("Undo")}</button><Help topic="Undo" /></span>
+                    <span class="with-help"><button on:click=move |_| drill.set(Vec::new())>{move || tr("Clear")}</button><Help topic="Clear" /></span>
+                    <span class="with-help"><button class="primary" on:click=start_drill disabled=move || drill.get().is_empty()>{move || tr("Start drill")}</button><Help topic="Start drill" /></span>
                 </div>
 
                 <div class="shots">
@@ -958,7 +968,7 @@ pub fn App() -> impl IntoView {
                         let d = drill_params.get()[(id - 1) as usize];
                         view! {
                             <div class="shot">
-                                <strong>{format!("#{} · point {id}", i + 1)}</strong>
+                                <strong>{move || format!("#{} · {} {id}", i + 1, tr("point"))}</strong>
                                 <Stepper label="Left ↔ right" value=((d.lr / 30) + 2).to_string() dec_label="◀" inc_label="▶"
                                     dec=move || edit_shot(i, &|p| p.lr = p.lr.saturating_add(30))
                                     inc=move || edit_shot(i, &|p| p.lr = p.lr.saturating_sub(30)) />
@@ -982,25 +992,25 @@ pub fn App() -> impl IntoView {
                 <SavedList title="Saved routes" noun="route" names=route_names can_save=Signal::derive(move || !drill.get().is_empty())
                     on_load=load_route on_delete=delete_route on_save=save_route />
 
-                <h3>"AI Coach"</h3>
-                <p class="hint">"Generates a random drill: the first ball goes deep to the chosen side, the rest anywhere. Level low adds 0.5 s between balls, high removes 0.5 s."</p>
+                <h3>{move || tr("AI Coach")}</h3>
+                <p class="hint">{move || tr("Generates a random drill: the first ball goes deep to the chosen side, the rest anywhere. Level low adds 0.5 s between balls, high removes 0.5 s.")}</p>
                 <div class="row">
-                    <span>"First ball"</span>
-                    <button class="mode" class:selected=move || ai.get().left on:click=move |_| ai.update(|a| a.left = true)>"Left"</button>
-                    <button class="mode" class:selected=move || !ai.get().left on:click=move |_| ai.update(|a| a.left = false)>"Right"</button>
+                    <span>{move || tr("First ball")}</span>
+                    <span class="with-help"><button class="mode" class:selected=move || ai.get().left on:click=move |_| ai.update(|a| a.left = true)>{move || tr("Left")}</button><Help topic="Left" /></span>
+                    <span class="with-help"><button class="mode" class:selected=move || !ai.get().left on:click=move |_| ai.update(|a| a.left = false)>{move || tr("Right")}</button><Help topic="Right" /></span>
                 </div>
                 <div class="row">
-                    <span>"Level"</span>
+                    <span>{move || tr("Level")}</span>
                     {[(0u8, "Low"), (1, "Mid"), (2, "High")].into_iter().map(|(lv, l)| view! {
-                        <button class="mode" class:selected=move || ai.get().level == lv on:click=move |_| ai.update(|a| a.level = lv)>{l}</button>
+                        <span class="with-help"><button class="mode" class:selected=move || ai.get().level == lv on:click=move |_| ai.update(|a| a.level = lv)>{move || tr(l)}</button><Help topic={match l { "Low" => "AI Low", "Mid" => "AI Mid", _ => "AI High" }} /></span>
                     }).collect_view()}
                 </div>
                 <div class="row">
-                    <span>"Balls"</span>
-                    <button on:click=move |_| ai.update(|a| a.balls = a.balls.saturating_sub(1).max(2))>"−"</button>
+                    <span>{move || tr("Balls")}</span>
+                    <span class="with-help"><button on:click=move |_| ai.update(|a| a.balls = a.balls.saturating_sub(1).max(2))>"−"</button><Help topic="Balls −" /></span>
                     <span class="value">{move || ai.get().balls}</span>
-                    <button on:click=move |_| ai.update(|a| a.balls = (a.balls + 1).min(9))>"+"</button>
-                    <button class="primary" on:click=generate>"Generate"</button>
+                    <span class="with-help"><button on:click=move |_| ai.update(|a| a.balls = (a.balls + 1).min(9))>"+"</button><Help topic="Balls +" /></span>
+                    <span class="with-help"><button class="primary" on:click=generate>{move || tr("Generate")}</button><Help topic="Generate" /></span>
                 </div>
             </section>
         </main>
@@ -1016,14 +1026,14 @@ pub fn App() -> impl IntoView {
                     advanced.set(on);
                     if let Some(st) = storage() { let _ = st.set_item(ADVANCED_KEY, if on { "1" } else { "0" }); }
                 } />
-            <span>"Show advanced (factory) controls"</span>
+            <span>{move || tr("Show advanced (factory) controls")}</span>
         </label>
         <Show when=move || advanced.get()>
             <Advanced ctx=ctx sport=sport status=status height=height height_level=height_level custom=custom />
         </Show>
 
         <details>
-            <summary>"BLE log"</summary>
+            <summary>{move || tr("BLE log")}</summary>
             <pre>{move || ctx.log.get().join("\n")}</pre>
         </details>
     }
@@ -1043,7 +1053,7 @@ where
 {
     view! {
         <label>
-            <span>{label} " " {move || value.get().to_string()}</span>
+            <span>{move || tr(label)} " " {move || value.get().to_string()}</span>
             <input type="range" min=min max=max step=step
                 prop:value=move || value.get().to_string()
                 on:input=move |ev| { if let Ok(v) = event_target_value(&ev).parse() { value.set(v) } }
@@ -1060,17 +1070,17 @@ fn PatternGroup(
     options: Vec<Pattern>,
 ) -> impl IntoView {
     view! {
-        <h3>{title}</h3>
+        <h3>{move || tr(title)}</h3>
         <div class="modes">
             {options.into_iter().map(|opt| {
-                let name = opt.name();
+                let label = opt.clone();
                 let same = opt.clone();
                 view! {
-                    <button class="mode"
+                    <span class="with-help"><button class="mode"
                         class:selected=move || std::mem::discriminant(&pattern.get()) == std::mem::discriminant(&same) && (matches!(same, Pattern::Program(_) | Pattern::Custom(_)) || pattern.get() == same)
                         on:click=move |_| select(opt.clone())>
-                        {name}
-                    </button>
+                        {move || pattern_name(&label)}
+                    </button><Help topic="Pattern" /></span>
                 }
             }).collect_view()}
         </div>
@@ -1081,7 +1091,7 @@ fn PatternGroup(
 #[component]
 fn PointButton(id: u8, list: RwSignal<Vec<u8>>, max: usize) -> impl IntoView {
     view! {
-        <button class="target"
+        <span class="with-help"><button class="target"
             class:picked=move || list.get().contains(&id)
             on:click=move |_| list.update(|d| if d.len() < max { d.push(id) })>
             <small>{id}</small>
@@ -1090,7 +1100,7 @@ fn PointButton(id: u8, list: RwSignal<Vec<u8>>, max: usize) -> impl IntoView {
                     .filter(|(_, q)| **q == id).map(|(i, _)| (i + 1).to_string()).collect();
                 if order.is_empty() { String::new() } else { format!("#{}", order.join(",")) }
             }}
-        </button>
+        </button><Help topic="Target" /></span>
     }
 }
 
@@ -1105,10 +1115,10 @@ fn Stepper(
 ) -> impl IntoView {
     view! {
         <div class="stepper">
-            <span>{label}</span>
-            <button on:click=move |_| dec()>{dec_label}</button>
+            <span>{move || tr(label)}</span>
+            <span class="with-help"><button on:click=move |_| dec()>{dec_label}</button><Help topic={if dec_label == "◀" { "Aim left" } else { "Decrease" }} /></span>
             <span class="value">{value}</span>
-            <button on:click=move |_| inc()>{inc_label}</button>
+            <span class="with-help"><button on:click=move |_| inc()>{inc_label}</button><Help topic={if inc_label == "▶" { "Aim right" } else { "Increase" }} /></span>
         </div>
     }
 }
@@ -1126,18 +1136,44 @@ fn SavedList(
 ) -> impl IntoView {
     let selected = RwSignal::new(String::new());
     view! {
-        <h3>{title}</h3>
+        <h3>{move || tr(title)}</h3>
         <div class="row">
             <select prop:value=move || selected.get() on:change=move |ev| selected.set(event_target_value(&ev))>
-                <option value="">{move || if names.get().is_empty() { format!("No saved {noun}s") } else { format!("Choose a {noun}…") }}</option>
+                <option value="">{move || match (ui::dutch(), names.get().is_empty()) {
+                    (true, true) => format!("Geen opgeslagen {}", saved_noun(noun, true)),
+                    (true, false) => format!("Kies een {}…", saved_noun(noun, false)),
+                    (false, true) => format!("No saved {noun}s"),
+                    (false, false) => format!("Choose a {noun}…"),
+                }}</option>
                 {move || names.get().into_iter().map(|n| view! { <option value=n.clone()>{n.clone()}</option> }).collect_view()}
             </select>
-            <button on:click=move |_| on_load(selected.get_untracked()) disabled=move || selected.get().is_empty()>"Load"</button>
-            <button disabled=move || selected.get().is_empty()
-                on:click=move |_| { on_delete(selected.get_untracked()); selected.set(String::new()); }>"Delete"</button>
-            <button disabled=move || !can_save.get()
-                on:click=move |_| if let Some(n) = prompt_name(&format!("Name for this {noun}")) { on_save(n.clone()); selected.set(n); }>"Save current"</button>
+            <span class="with-help"><button on:click=move |_| on_load(selected.get_untracked()) disabled=move || selected.get().is_empty()>{move || tr("Load")}</button><Help topic="Load" /></span>
+            <span class="with-help"><button disabled=move || selected.get().is_empty()
+                on:click=move |_| { on_delete(selected.get_untracked()); selected.set(String::new()); }>{move || tr("Delete")}</button><Help topic="Delete" /></span>
+            <span class="with-help"><button disabled=move || !can_save.get()
+                on:click=move |_| {
+                    let prompt = if ui::dutch() { format!("Naam voor dit item ({})", saved_noun(noun, false)) } else { format!("Name for this {noun}") };
+                    if let Some(n) = prompt_name(&prompt) { on_save(n.clone()); selected.set(n); }
+                }>{move || tr("Save current")}</button><Help topic="Save current" /></span>
         </div>
+    }
+}
+
+fn saved_noun(noun: &str, plural: bool) -> &str {
+    match (noun, plural) {
+        ("program", true) => "programma’s",
+        ("program", false) => "programma",
+        ("point set", true) => "puntensets",
+        ("point set", false) => "puntenset",
+        ("route", true) => "routes",
+        _ => "route",
+    }
+}
+
+fn pattern_name(pattern: &Pattern) -> String {
+    match pattern {
+        Pattern::Fixed(n) => format!("{} {n}", tr("Fixed point")),
+        _ => tr(&pattern.name()).to_owned(),
     }
 }
 
@@ -1176,7 +1212,7 @@ fn Advanced(
     };
     let field = move |label: &'static str, max: u32, get: fn(&RawPoint) -> u32, set: fn(&mut RawPoint, u32)| view! {
         <label class="field">
-            <span>{label}</span>
+            <span>{move || tr(label)}</span>
             <input type="number" min=0 max=max
                 prop:value=move || get(&point.get()).to_string()
                 on:change=move |ev| {
@@ -1187,28 +1223,28 @@ fn Advanced(
     };
     view! {
         <section class="advanced" class:disabled=move || !connected()>
-            <h2>"Advanced"</h2>
-            <p class="warn">"Hidden factory controls from the official app. They were never shown to users and have not been tested on a machine. Use at your own risk."</p>
+            <h2>{move || tr("Advanced")}</h2>
+            <p class="warn">{move || tr("Hidden factory controls from the official app. They were never shown to users and have not been tested on a machine. Use at your own risk.")}</p>
 
-            <h3>"Read value"</h3>
+            <h3>{move || tr("Read value")}</h3>
             <div class="row">
-                <button on:click=read>"Read value (0x71)"</button>
+                <span class="with-help"><button on:click=read>{move || tr("Read value (0x71)")}</button><Help topic="Read value (0x71)" /></span>
                 <span class="value">{move || match status.get() {
                     Some((a, b)) => format!("va1 = {a}, va2 = {b}"),
-                    None => "No 0x30 reply yet".into(),
+                    None => tr("No 0x30 reply yet").into(),
                 }}</span>
             </div>
 
-            <h3>"Point editor"</h3>
-            <p class="hint">"Writes one stored court point with unchecked values, then sends apply. Points 1–35 are rewritten from the height table on reconnect or height change; 36–41 from the custom points."</p>
+            <h3>{move || tr("Point editor")}</h3>
+            <p class="hint">{move || tr("Writes one stored court point with unchecked values, then sends apply. Points 1–35 are rewritten from the height table on reconnect or height change; 36–41 from the custom points.")}</p>
             <div class="row">
                 <label class="field">
-                    <span>"Point (1–41)"</span>
+                    <span>{move || tr("Point (1–41)")}</span>
                     <input type="number" min=1 max=p::ALL_POINTS
                         prop:value=move || point.get().id.to_string()
                         on:change=move |ev| load(event_target_value(&ev).trim().parse::<u8>().unwrap_or(1).clamp(1, p::ALL_POINTS)) />
                 </label>
-                <button on:click=move |_| load(point.get_untracked().id) title="Reload the values currently uploaded for this point">"Load current"</button>
+                <span class="with-help"><button on:click=move |_| load(point.get_untracked().id) title=move || tr("Reload the values currently uploaded for this point")>{move || tr("Load current")}</button><Help topic="Load current" /></span>
             </div>
             <div class="fields">
                 {field("Left ↔ right", u16::MAX as u32, |pt| pt.lr as u32, |pt, v| pt.lr = v as u16)}
@@ -1218,7 +1254,7 @@ fn Advanced(
             </div>
             <p class="hint mono">{move || p::hex(&point.get().frame())}</p>
             <div class="row">
-                <button class="primary" on:click=write>"Write point"</button>
+                <span class="with-help"><button class="primary" on:click=write>{move || tr("Write point")}</button><Help topic="Write point" /></span>
             </div>
         </section>
     }

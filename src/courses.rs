@@ -9,6 +9,8 @@
 //! build time. Images and videos are plain media URLs and load directly.
 
 #[cfg(target_arch = "wasm32")]
+use crate::ui::{self, Help, tr};
+#[cfg(target_arch = "wasm32")]
 use leptos::prelude::*;
 #[cfg(target_arch = "wasm32")]
 use leptos::task::spawn_local;
@@ -103,6 +105,36 @@ pub fn translate(zh: &str) -> String {
     zh.to_string()
 }
 
+#[cfg(target_arch = "wasm32")]
+fn localized(zh: &str) -> String {
+    if !ui::dutch() {
+        return translate(zh);
+    }
+    let zh = zh.trim();
+    let dutch = ["forehand", "backhand", "forehandslice", "backhandslice", "forehandvolley",
+        "backhandvolley", "dropshot", "slagen op korte afstand", "slagen op middellange afstand",
+        "slagen op lange afstand", "stuiterende ballen", "ballen uit de lucht", "lage ballen", "hoge ballen"];
+    let term = |text: &str| TERMS.iter().position(|(key, _)| *key == text).map(|i| dutch[i]);
+    if zh == "普尚机器进阶练习" {
+        return "Gevorderde oefening met de Pusun-machine".into();
+    }
+    if let Some(stroke) = zh.strip_prefix("盖奥-").and_then(term) {
+        return format!("{COACH}: {}", capitalize(stroke));
+    }
+    if let Some(stroke) = zh.strip_suffix("是常用的技术之一，课程细分为动作跟练，分解动作和击球进阶练习").and_then(term) {
+        return format!("{} is een veelgebruikte techniek. De cursus bevat een meedoenles, een uitleg in stappen en een gevorderde slagoefening.", capitalize(stroke));
+    }
+    if let Some(stroke) = zh.strip_prefix("盖奥进阶课程-实战中").and_then(|s| s.strip_suffix("的处理技巧和方法")).and_then(term) {
+        return format!("Gevorderde cursus van {COACH}: technieken voor {stroke} in wedstrijden.");
+    }
+    for (suffix, label) in [("跟练", "meedoenles"), ("分解动作", "uitleg in stappen"), ("视频课程", "videoles")] {
+        if let Some(stroke) = zh.strip_suffix(suffix).and_then(term) {
+            return format!("{}: {label}", capitalize(stroke));
+        }
+    }
+    translate(zh)
+}
+
 impl Course {
     /// Vary Speed points (1..=28) from `seles`, as the app parses them.
     pub fn points(&self) -> Vec<u8> {
@@ -124,6 +156,35 @@ impl Course {
         } else {
             Some(format!("{BASE_URL}{}", r.trim_start_matches('/')))
         }
+    }
+}
+
+fn subtitle_stem(url: &str) -> Option<&str> {
+    let stem = url.split(['?', '#']).next()?.rsplit('/').next()?.strip_suffix(".mp4")?;
+    match stem {
+        "diqiu" | "fan_gen" | "fangs" | "fanj" | "fanp" | "fantan" | "gaoqiu" | "jief" | "jiez" | "jinju" | "lingkong" | "manfangs" | "manjief" | "manjiez" | "manxiaof" | "manxiaoz" | "pfangs" | "pjief" | "pjiez" | "pxiaof" | "pxiaoz" | "xiaof" | "xiaoz" | "yuanju" | "zheng_gen" | "zhengj" | "zhengp" | "zhongju" => Some(stem),
+        _ => None,
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+#[component]
+fn SubtitleTracks(stem: String) -> impl IntoView {
+    use web_sys::TextTrackMode::{Disabled, Showing};
+
+    let en = NodeRef::<leptos::html::Track>::new();
+    let nl = NodeRef::<leptos::html::Track>::new();
+    Effect::new(move |_| {
+        let dutch = ui::dutch();
+        if let (Some(en), Some(nl)) = (en.get(), nl.get()) {
+            let (active, inactive) = if dutch { (nl, en) } else { (en, nl) };
+            if let Some(track) = inactive.track() { track.set_mode(Disabled); }
+            if let Some(track) = active.track() { track.set_mode(Showing); }
+        }
+    });
+    view! {
+        <track node_ref=en kind="subtitles" src=format!("subs/{stem}.en.vtt") srclang="en" label="English" />
+        <track node_ref=nl kind="subtitles" src=format!("subs/{stem}.nl.vtt") srclang="nl" label="Nederlands" />
     }
 }
 
@@ -177,28 +238,29 @@ pub fn Courses(on_practice: impl Fn(Vec<u8>) + Copy + Send + Sync + 'static) -> 
 
     view! {
         <section>
-            <h2>"Courses"</h2>
+            <h2>{move || tr("Courses")}</h2>
             <Show when=move || courses.get().is_none()>
-                <p class="hint">"Training videos and drills from Pusun's servers. Course texts are translated from Chinese; the videos keep their original audio."</p>
-                <button on:click=move |_| load() disabled=move || loading.get()>
-                    {move || if loading.get() { "Loading…" } else { "Load courses" }}
-                </button>
+                <p class="hint">{move || tr("Training videos and drills from Pusun's servers. Course texts are translated from Chinese; the videos keep their original audio.")}</p>
+                <span class="with-help"><button on:click=move |_| load() disabled=move || loading.get()>
+                    {move || if loading.get() { tr("Loading…") } else { tr("Load courses") }}
+                </button><Help topic="Load courses" /></span>
             </Show>
             {move || match courses.get() {
                 Some(Err(e)) => view! {
-                    <p class="error">{e} " " <button on:click=move |_| load()>"Retry"</button></p>
+                    <p class="error">{e} " " <span class="with-help"><button on:click=move |_| load()>{move || tr("Retry")}</button><Help topic="Retry" /></span></p>
                 }.into_any(),
                 Some(Ok((list, copy))) if open.get().is_none() => view! {
-                    {copy.then(|| view! { <p class="hint">"Saved copy of the course list from when this site was built."</p> })}
+                    {copy.then(|| view! { <p class="hint">{move || tr("Saved copy of the course list from when this site was built.")}</p> })}
                     <div class="courses">
                         {list.into_iter().map(|c| {
                             let pick = c.clone();
+                            let image = c.image();
                             view! {
-                                <button class="course" on:click=move |_| show(pick.clone())>
-                                    {c.image().map(|src| view! { <img src=src alt="" loading="lazy" /> })}
-                                    <span class="course-name">{translate(&c.dao_name)}</span>
-                                    <small>{translate(c.info.as_deref().unwrap_or_default())}</small>
-                                </button>
+                                <span class="with-help"><button class="course" on:click=move |_| show(pick.clone())>
+                                    {image.map(|src| view! { <img src=src alt="" loading="lazy" /> })}
+                                    <span class="course-name">{move || localized(&c.dao_name)}</span>
+                                    <small>{move || localized(c.info.as_deref().unwrap_or_default())}</small>
+                                </button><Help topic="Course" /></span>
                             }
                         }).collect_view()}
                     </div>
@@ -208,25 +270,35 @@ pub fn Courses(on_practice: impl Fn(Vec<u8>) + Copy + Send + Sync + 'static) -> 
             {move || open.get().map(|c| {
                 let points = c.points();
                 let videos = c.tutorial_videos.clone();
+                let image = c.image();
                 view! {
                     <div class="course-detail">
-                        <button on:click=move |_| open.set(None)>"← All courses"</button>
-                        <h3>{translate(&c.dao_name)}</h3>
-                        <video controls playsinline preload="metadata" src=move || playing.get() poster=c.image()></video>
+                        <span class="with-help"><button on:click=move |_| open.set(None)>{move || tr("← All courses")}</button><Help topic="← All courses" /></span>
+                        <h3>{move || localized(&c.dao_name)}</h3>
+                        {let poster = image;
+                        move || {
+                            let url = playing.get();
+                            let tracks = subtitle_stem(&url).map(|stem| view! { <SubtitleTracks stem=stem.to_owned() /> });
+                            view! {
+                                <video controls playsinline preload="metadata" src=url poster=poster.clone()>
+                                    {tracks}
+                                </video>
+                            }
+                        }}
                         <div class="row">
                             {videos.into_iter().map(|v| {
                                 let url = v.video.clone();
                                 let url2 = url.clone();
                                 view! {
-                                    <button class="mode" class:selected=move || playing.get() == url
-                                        on:click=move |_| playing.set(url2.clone())>{translate(&v.video_name)}</button>
+                                    <span class="with-help"><button class="mode" class:selected=move || playing.get() == url
+                                        on:click=move |_| playing.set(url2.clone())>{move || localized(&v.video_name)}</button><Help topic="Video" /></span>
                                 }
                             }).collect_view()}
                         </div>
-                        <p>{translate(c.info.as_deref().unwrap_or_default())}</p>
-                        <p class="hint">{format!("Used {} times.", c.use_times)}</p>
-                        <button class="primary" disabled=points.is_empty()
-                            on:click=move |_| on_practice(points.clone())>"Practice in Vary Speed"</button>
+                        <p>{move || localized(c.info.as_deref().unwrap_or_default())}</p>
+                        <p class="hint">{move || format!("{} {} {}", tr("Used"), c.use_times, tr("times."))}</p>
+                        <span class="with-help"><button class="primary" disabled=points.is_empty()
+                            on:click=move |_| on_practice(points.clone())>{move || tr("Practice in Vary Speed")}</button><Help topic="Practice in Vary Speed" /></span>
                     </div>
                 }
             })}

@@ -51,3 +51,31 @@ button.dirty { border-color: var(--accent); color: var(--accent); font-weight: 6
 .field input { font: inherit; padding: .4rem; border-radius: .5rem; border: 1px solid var(--line); background: Canvas; color: inherit; width: 100%; box-sizing: border-box; }
 .mono { font-family: ui-monospace, monospace; }
 .sport { display: flex; gap: .3rem; }
+
+.language, .with-help { display: inline-flex; align-items: center; gap: .3rem; }
+button.help-button {
+    display: inline-grid;
+    place-items: center;
+    flex: 0 0 auto;
+    min-width: 24px;
+    min-height: 24px;
+    padding: 0 .2rem;
+    border-radius: 50%;
+    border-color: #1656ad;
+    background: #1656ad;
+    color: #fff;
+    font-weight: 700;
+}
+.help-dialog {
+    width: min(28rem, calc(100% - 3rem));
+    border: 1px solid var(--line);
+    border-radius: .75rem;
+    padding: 1rem;
+}
+.help-dialog::backdrop { background: #0008; }
+.court-row .with-help { min-width: 0; gap: 2px; }
+.court-row .target { flex: 1 1 auto; min-width: 0; }
+.courses .with-help { align-items: start; }
+.courses .course { flex: 1; min-width: 0; }
+main.disabled .help-button, .advanced.disabled .help-button,
+main.disabled .help-dialog, .advanced.disabled .help-dialog { pointer-events: auto; }

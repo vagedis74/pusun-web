@@ -13,7 +13,7 @@ leptos = { version = "0.8.23", features = ["csr"] }
 serde = { version = "1.0.229", features = ["derive"] }
 wasm-bindgen = "0.2.130"
 wasm-bindgen-futures = "0.4.80"
-web-sys = { version = "0.3.107", features = ["Window", "Navigator", "Bluetooth", "BluetoothDevice", "BluetoothRemoteGattServer", "BluetoothRemoteGattService", "BluetoothRemoteGattCharacteristic", "BluetoothLeScanFilterInit", "RequestDeviceOptions", "Event", "EventTarget", "Storage", "Document", "Element"] }
+web-sys = { version = "0.3.107", features = ["Window", "Navigator", "Bluetooth", "BluetoothDevice", "BluetoothRemoteGattServer", "BluetoothRemoteGattService", "BluetoothRemoteGattCharacteristic", "BluetoothLeScanFilterInit", "RequestDeviceOptions", "Event", "EventTarget", "Storage", "Document", "Element", "HtmlDialogElement", "HtmlTrackElement", "TextTrack", "TextTrackMode"] }
 
 [dev-dependencies]
 serde_json = "1.0.154"
