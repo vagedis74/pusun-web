@@ -326,6 +326,8 @@ pub fn App() -> impl IntoView {
     let battery = RwSignal::new(None::<u8>);
     let fault = RwSignal::new(None::<String>);
     let running = RwSignal::new(false);
+    // Key of the library drill started last, so its card can show it is playing.
+    let active_drill = RwSignal::new(None::<&'static str>);
     let connecting = RwSignal::new(false);
 
     let sport = RwSignal::new(match storage().and_then(|s| s.get_item(SPORT_KEY).ok().flatten()).as_deref() {
@@ -467,6 +469,7 @@ pub fn App() -> impl IntoView {
         }
         fault.set(None);
         running.set(true);
+        active_drill.set(None);
         ctx.run(pat.start());
     };
     let stop = move || {
@@ -608,7 +611,10 @@ pub fn App() -> impl IntoView {
         let frames = p::drill(&pts, &drill_params.get_untracked(), pause.get_untracked(), date());
         ctx.run(frames.into_iter().map(|f| (50, f)).collect());
     };
-    let start_drill = move |_| start_current_drill();
+    let start_drill = move |_| {
+        active_drill.set(None);
+        start_current_drill();
+    };
     // Built-in drills load into Vary Speed like a saved route, at the chosen difficulty.
     let difficulty = RwSignal::new(
         storage()
@@ -1069,7 +1075,8 @@ pub fn App() -> impl IntoView {
                         let level = move || { let (en, nl) = d.level.label(); if ui::dutch() { nl } else { en } };
                         let balls = d.points().len();
                         view! {
-                            <article class="drill" id=format!("drill-{}", d.key)>
+                            <article class="drill" id=format!("drill-{}", d.key)
+                                class:playing=move || running.get() && active_drill.get() == Some(d.key)>
                                 <div class="drill-head">
                                     <strong>{name}</strong>
                                     <span class=format!("level level-{}", d.level.label().0.to_lowercase())>{level}</span>
@@ -1086,7 +1093,13 @@ pub fn App() -> impl IntoView {
                                 }}</small>
                                 <div class="row">
                                     <span class="with-help"><button class="primary" disabled=move || !connected()
-                                        on:click=move |_| { load_library_drill(d); start_current_drill(); }>{move || tr("Start")}</button><Help topic="Drill start" /></span>
+                                        on:click=move |_| {
+                                        load_library_drill(d);
+                                        start_current_drill();
+                                        active_drill.set(Some(d.key));
+                                    }>{move || tr("Start")}</button><Help topic="Drill start" /></span>
+                                <span class="with-help"><button class="stop" disabled=move || !connected()
+                                    on:click=move |_| stop()>{move || tr("Stop")}</button><Help topic="Drill stop" /></span>
                                     <span class="with-help"><button on:click=move |_| {
                                         load_library_drill(d);
                                         if let Some(el) = document().get_element_by_id("vary-speed") { el.scroll_into_view(); }

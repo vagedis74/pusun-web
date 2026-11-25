@@ -54,7 +54,8 @@ Web Bluetooth only works in **Chrome or Edge** (desktop or Android) on `https://
 - Drills (tennis): a built-in library (`src/drills.rs`) of ten singles drills, from a beginner
   warm-up to pressure feeding, and six doubles drills for a pair (middle balls, crosscourt,
   one up one back, poaching, both at the net, lob and switch), each with a level and description;
-  Start plays one at once, Edit opens it in Vary Speed to tune each ball first. A 1–5 difficulty
+  Start plays one at once, Stop stops the machine, Edit opens it in Vary Speed to tune each ball
+  first; the playing drill's card is outlined. A 1–5 difficulty
   setting (remembered in the browser) applies to all drills: 3 plays them as written, and each step
   up feeds the next ball 0.5 s sooner and 3 speed units faster
 - AI Coach: random drills from first-ball side, level and ball count (2–9)
