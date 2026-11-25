@@ -232,6 +232,18 @@ pub const LIBRARY: &[Drill] = &[
     },
     // Doubles: two players on the receiving side. Left and right are the halves of the court.
     Drill {
+        key: "doubleswarmup",
+        name: ("Doubles warm-up", "Warming-up dubbelspel"),
+        description: (
+            "Both players on the baseline, one per half. Calm, slower balls alternate to the left and right player, each to the middle of their half. Rally them back easily to find your rhythm.",
+            "Beide spelers op de achterlijn, één per helft. Rustige, langzamere ballen wisselen naar de linker- en rechterspeler, elk naar het midden van zijn helft. Speel ze ontspannen terug om in je ritme te komen.",
+        ),
+        level: Level::Beginner,
+        doubles: true,
+        pause: DrillPause::None,
+        balls: &[shaped(16, 2000, -6, 50, 0), shaped(20, 2000, -6, 50, 0)],
+    },
+    Drill {
         key: "middle",
         name: ("Down the middle", "Door het midden"),
         description: (
