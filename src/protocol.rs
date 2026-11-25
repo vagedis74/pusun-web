@@ -605,12 +605,35 @@ pub const DRILL_LR: (u16, u16) = (90, 2370);
 /// Left-right value of the grid's centre column (points 4, 11, 18, 25).
 pub const DRILL_LR_CENTRE: u16 = 1200;
 
-/// How far `lr` aims from the centre, in percent of the way to that side's limit:
-/// positive is left (100 at 2370), negative is right (−100 at 90).
-pub fn drill_lr_percent(lr: u16) -> i32 {
-    let (lr, c) = (lr as i32, DRILL_LR_CENTRE as i32);
-    let limit = if lr >= c { DRILL_LR.1 as i32 - c } else { c - DRILL_LR.0 as i32 };
+/// Left-right value of the court grid's centre column (points 4, 11, …), the middle of
+/// the custom points' range.
+pub const LR_CENTRE: u16 = 1140;
+
+/// How far `lr` aims from `centre`, in percent of the way to that side's limit, rounded:
+/// positive is left (100 at `max`), negative is right (−100 at `min`).
+fn lr_percent(lr: u16, min: u16, centre: u16, max: u16) -> i32 {
+    let (lr, c) = (lr as i32, centre as i32);
+    let limit = if lr >= c { max as i32 - c } else { c - min as i32 };
     ((lr - c) * 100 + limit / 2 * (lr - c).signum()) / limit
+}
+
+/// [`lr_percent`] for a Vary Speed point.
+pub fn drill_lr_percent(lr: u16) -> i32 {
+    lr_percent(lr, DRILL_LR.0, DRILL_LR_CENTRE, DRILL_LR.1)
+}
+
+/// [`lr_percent`] for a custom point.
+pub fn custom_lr_percent(lr: u16) -> i32 {
+    lr_percent(lr, LR_MIN, LR_CENTRE, LR_MAX)
+}
+
+/// An aim percentage as shown: "0%", "L 25%" or "R 25%".
+pub fn lr_percent_label(percent: i32) -> String {
+    match percent {
+        0 => "0%".to_string(),
+        n if n > 0 => format!("L {n}%"),
+        n => format!("R {}%", -n),
+    }
 }
 pub const DRILL_UD: (u16, u16) = (300, 4500);
 pub const DRILL_SPEED: (u8, u8) = (50, 140);
@@ -800,6 +823,11 @@ mod tests {
         assert_eq!(drill_lr_percent(DRILL_LR.0), -100);
         assert_eq!(drill_lr_percent(2130), 79); // grid column 1, far left
         assert_eq!(drill_lr_percent(270), -84); // grid column 7, far right
+        assert_eq!(custom_lr_percent(LR_CENTRE), 0);
+        assert_eq!(custom_lr_percent(LR_MAX), 100);
+        assert_eq!(custom_lr_percent(LR_MIN), -100);
+        assert_eq!(custom_lr_percent(1450), 33);
+        assert_eq!(lr_percent_label(-84), "R 84%");
     }
 
     // Expected bytes are literal arrays from MainActivity7New.
