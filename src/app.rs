@@ -7,6 +7,7 @@ use leptos::task::spawn_local;
 
 use crate::ble::Machine;
 use crate::courses::Courses;
+use crate::drills::{Drill, LIBRARY};
 use crate::protocol::{self as p, AiOptions, CustomPoint, DrillPause, DrillPoint, Frame, Height, Notification, Pattern, PatternDefault, ProgramSettings, RawPoint, Sport};
 
 /// A frame and the delay before sending it, mirroring the app's `postDelayed` gaps.
@@ -595,7 +596,7 @@ pub fn App() -> impl IntoView {
     let ai = RwSignal::new(AiOptions { left: true, level: 1, balls: 3 });
     let date = move || ctx.name.get_untracked().as_deref().and_then(p::date_code);
 
-    let start_drill = move |_| {
+    let start_current_drill = move || {
         let pts = drill.get_untracked();
         if pts.is_empty() {
             return;
@@ -604,6 +605,17 @@ pub fn App() -> impl IntoView {
         running.set(true);
         let frames = p::drill(&pts, &drill_params.get_untracked(), pause.get_untracked(), date());
         ctx.run(frames.into_iter().map(|f| (50, f)).collect());
+    };
+    let start_drill = move |_| start_current_drill();
+    // Built-in drills load into Vary Speed like a saved route.
+    let load_library_drill = move |d: &'static Drill| {
+        drill_params.update(|params| {
+            for (id, pt) in d.params() {
+                params[(id - 1) as usize] = pt;
+            }
+        });
+        pause.set(d.pause);
+        drill.set(d.points());
     };
     // Editing a shot changes its point and is sent to the machine straight away, like the app.
     let edit_shot = move |position: usize, f: &dyn Fn(&mut DrillPoint)| {
@@ -1017,6 +1029,36 @@ pub fn App() -> impl IntoView {
                 </div>
             </section>
         </main>
+
+        <section id="drills" style:display=move || if padel() { "none" } else { "" }>
+            <h2>{move || tr("Drills")}</h2>
+            <p class="hint">{move || tr("Ready-made tennis drills. Start plays one straight away; Edit opens it in Vary Speed so you can tune each ball first.")}</p>
+            <div class="drills">
+                {LIBRARY.iter().map(|d| {
+                    let name = move || if ui::dutch() { d.name.1 } else { d.name.0 };
+                    let level = move || { let (en, nl) = d.level.label(); if ui::dutch() { nl } else { en } };
+                    let balls = d.points().len();
+                    view! {
+                        <article class="drill" id=format!("drill-{}", d.key)>
+                            <div class="drill-head">
+                                <strong>{name}</strong>
+                                <span class=format!("level level-{}", d.level.label().0.to_lowercase())>{level}</span>
+                            </div>
+                            <p>{move || if ui::dutch() { d.description.1 } else { d.description.0 }}</p>
+                            <small class="hint">{move || format!("{balls} {}", if balls == 1 { tr("ball") } else { tr("balls") })}</small>
+                            <div class="row">
+                                <span class="with-help"><button class="primary" disabled=move || !connected()
+                                    on:click=move |_| { load_library_drill(d); start_current_drill(); }>{move || tr("Start")}</button><Help topic="Drill start" /></span>
+                                <span class="with-help"><button on:click=move |_| {
+                                    load_library_drill(d);
+                                    if let Some(el) = document().get_element_by_id("vary-speed") { el.scroll_into_view(); }
+                                }>{move || tr("Edit")}</button><Help topic="Drill edit" /></span>
+                            </div>
+                        </article>
+                    }
+                }).collect_view()}
+            </div>
+        </section>
 
         <div style:display=move || if padel() { "none" } else { "" }>
             <Courses on_practice=practice_course />

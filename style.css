@@ -79,3 +79,13 @@ button.help-button {
 .courses .course { flex: 1; min-width: 0; }
 main.disabled .help-button, .advanced.disabled .help-button,
 main.disabled .help-dialog, .advanced.disabled .help-dialog { pointer-events: auto; }
+
+.drills { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: .6rem; }
+.drill { display: grid; gap: .3rem; align-content: start; padding: .6rem .7rem; border: 1px solid var(--line); border-radius: .5rem; }
+.drill p { margin: 0; font-size: .9rem; }
+.drill .row { margin: .2rem 0 0; }
+.drill-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: .4rem; }
+.level { font-size: .75rem; padding: .1rem .45rem; border-radius: 1rem; border: 1px solid currentColor; white-space: nowrap; }
+.level-beginner { color: #2f8f46; }
+.level-intermediate { color: #b7791f; }
+.level-advanced { color: var(--stop); }

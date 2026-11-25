@@ -51,6 +51,9 @@ Web Bluetooth only works in **Chrome or Edge** (desktop or Android) on `https://
 - Vary Speed drills: up to 15 shots on a 7×4 target grid, each shot tunable (aim, height,
   speed, interval, spin; changes are sent live), optional pause before repeating
 - Saved routes (name, order, pause, shot settings) stored in the browser
+- Drills (tennis): a built-in library of ten named drills (`src/drills.rs`), from a beginner
+  warm-up to pressure feeding, each with a level and description; Start plays one at once,
+  Edit opens it in Vary Speed to tune each ball first
 - AI Coach: random drills from first-ball side, level and ball count (2–9)
 - Courses: Pusun's online training courses with their videos, with names, descriptions and
   video titles translated from Chinese (by pattern, in `src/courses.rs`); "Practice in Vary Speed"

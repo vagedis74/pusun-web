@@ -7,6 +7,7 @@ mod ui;
 #[cfg(target_arch = "wasm32")]
 mod ble;
 mod courses;
+mod drills;
 mod protocol;
 mod tables;
 
