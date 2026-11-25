@@ -141,10 +141,14 @@ fn landing(point: u8) -> Spot {
 /// Marker colours of player 1 and player 2.
 pub const PLAYER_COLOURS: [&str; 2] = ["#2b6cb0", "#b7791f"];
 
-/// Which player (index into `players`) each ball is for: in singles always the one player;
+/// Which player (index into `players`) each ball is for: as listed in the drill, if it is;
+/// otherwise in singles always the one player;
 /// in doubles the player starting on the side the ball lands, and a ball through the middle
 /// goes to whoever had the ball before (the first ball to player 1).
 fn receivers(d: &Drill) -> Vec<usize> {
+    if !d.receivers.is_empty() {
+        return d.receivers.to_vec();
+    }
     let mut prev = 0;
     d.balls
         .iter()
@@ -267,6 +271,9 @@ pub struct Drill {
     pub machine: Spot,
     /// Where each player starts: the player who gets the first ball, then the partner.
     pub players: &'static [Spot],
+    /// Which player (index into `players`) takes each ball; empty to work it out from
+    /// where the balls land (see [`receivers`]).
+    receivers: &'static [usize],
 }
 
 impl Drill {
@@ -315,6 +322,7 @@ pub const LIBRARY: &[Drill] = &[
         pause: DrillPause::None,
         machine: MACHINE,
         players: &[at(0.0, 12.5)],
+        receivers: &[],
         balls: &[ball(17, 50), ball(19, 50)],
     },
     Drill {
@@ -329,6 +337,7 @@ pub const LIBRARY: &[Drill] = &[
         pause: DrillPause::None,
         machine: MACHINE,
         players: &[at(0.0, 12.5)],
+        receivers: &[],
         balls: &[shaped(23, 2000, 0, 40, 2), shaped(27, 2000, 0, 40, 2)],
     },
     Drill {
@@ -343,6 +352,7 @@ pub const LIBRARY: &[Drill] = &[
         pause: DrillPause::Short,
         machine: MACHINE,
         players: &[at(0.0, 12.5)],
+        receivers: &[],
         balls: &[shaped(22, 2000, 0, 35, 1), shaped(28, 2000, 0, 35, 1)],
     },
     Drill {
@@ -357,6 +367,7 @@ pub const LIBRARY: &[Drill] = &[
         pause: DrillPause::Short,
         machine: MACHINE,
         players: &[at(0.0, 12.5)],
+        receivers: &[],
         balls: &[ball(24, 45), ball(24, 45), ball(28, 45)],
     },
     Drill {
@@ -371,6 +382,7 @@ pub const LIBRARY: &[Drill] = &[
         pause: DrillPause::Long,
         machine: MACHINE,
         players: &[at(0.0, 12.5)],
+        receivers: &[],
         balls: &[shaped(4, 2000, 0, 50, -3), shaped(16, 1500, 10, 30, 0), shaped(20, 1500, 10, 30, 0)],
     },
     Drill {
@@ -385,6 +397,7 @@ pub const LIBRARY: &[Drill] = &[
         pause: DrillPause::Long,
         machine: MACHINE,
         players: &[at(0.0, 12.5)],
+        receivers: &[],
         balls: &[
             shaped(25, 2000, 0, 40, 1),
             shaped(13, 2000, -4, 35, 0),
@@ -404,6 +417,7 @@ pub const LIBRARY: &[Drill] = &[
         pause: DrillPause::Short,
         machine: MACHINE,
         players: &[at(0.0, 6.4)],
+        receivers: &[],
         balls: &[
             shaped(2, 1500, -20, 30, -3),
             shaped(9, 1500, 5, 35, 0),
@@ -423,6 +437,7 @@ pub const LIBRARY: &[Drill] = &[
         pause: DrillPause::Short,
         machine: MACHINE,
         players: &[at(0.0, 3.0)],
+        receivers: &[],
         balls: &[shaped(10, 4000, -6, 60, 0), shaped(12, 4000, -6, 60, 0)],
     },
     Drill {
@@ -437,6 +452,7 @@ pub const LIBRARY: &[Drill] = &[
         pause: DrillPause::Short,
         machine: MACHINE,
         players: &[at(0.0, 13.0)],
+        receivers: &[],
         balls: &[shaped(22, 2600, 0, 45, 5), shaped(25, 2600, 0, 45, 5), shaped(28, 2600, 0, 45, 5)],
     },
     Drill {
@@ -451,6 +467,7 @@ pub const LIBRARY: &[Drill] = &[
         pause: DrillPause::None,
         machine: MACHINE,
         players: &[at(0.0, 12.5)],
+        receivers: &[],
         balls: &[shaped(9, 1600, 0, 45, -4), shaped(13, 1600, 0, 45, -4)],
     },
     Drill {
@@ -465,6 +482,7 @@ pub const LIBRARY: &[Drill] = &[
         pause: DrillPause::Short,
         machine: MACHINE,
         players: &[at(0.0, 12.5)],
+        receivers: &[],
         balls: &[ball(22, 40), ball(4, 40), ball(28, 40), ball(4, 40)],
     },
     Drill {
@@ -479,6 +497,7 @@ pub const LIBRARY: &[Drill] = &[
         pause: DrillPause::Long,
         machine: MACHINE,
         players: &[at(0.0, 12.5)],
+        receivers: &[],
         balls: &[
             shaped(22, 2000, 5, 30, 1),
             shaped(26, 2000, 5, 30, 1),
@@ -501,6 +520,7 @@ pub const LIBRARY: &[Drill] = &[
         pause: DrillPause::None,
         machine: MACHINE,
         players: &[at(-2.7, 12.5), at(2.7, 12.5)],
+        receivers: &[],
         balls: &[shaped(16, 2000, -6, 50, 0), shaped(20, 2000, -6, 50, 0)],
     },
     Drill {
@@ -515,6 +535,7 @@ pub const LIBRARY: &[Drill] = &[
         pause: DrillPause::None,
         machine: MACHINE,
         players: &[at(-2.7, 12.5), at(2.7, 12.5)],
+        receivers: &[],
         balls: &[ball(25, 50), ball(18, 50)],
     },
     Drill {
@@ -529,6 +550,7 @@ pub const LIBRARY: &[Drill] = &[
         pause: DrillPause::None,
         machine: MACHINE,
         players: &[at(2.7, 12.5), at(-2.7, 12.5)],
+        receivers: &[],
         balls: &[shaped(27, 2000, 0, 40, 1), shaped(23, 2000, 0, 40, 1)],
     },
     Drill {
@@ -543,6 +565,7 @@ pub const LIBRARY: &[Drill] = &[
         pause: DrillPause::None,
         machine: MACHINE,
         players: &[at(2.7, 12.5), at(-2.7, 3.0)],
+        receivers: &[],
         balls: &[shaped(27, 2000, 0, 35, 1), shaped(16, 1500, 10, 40, 0)],
     },
     Drill {
@@ -557,6 +580,7 @@ pub const LIBRARY: &[Drill] = &[
         pause: DrillPause::Short,
         machine: MACHINE,
         players: &[at(-2.7, 3.0), at(2.7, 12.5)],
+        receivers: &[0, 1],
         balls: &[shaped(18, 1500, 10, 40, 0), shaped(22, 2000, 0, 45, 1)],
     },
     Drill {
@@ -571,6 +595,7 @@ pub const LIBRARY: &[Drill] = &[
         pause: DrillPause::Short,
         machine: MACHINE,
         players: &[at(-2.7, 3.0), at(2.7, 3.0)],
+        receivers: &[],
         balls: &[
             shaped(16, 1500, 10, 25, 0),
             shaped(18, 1500, 10, 25, 0),
@@ -590,6 +615,7 @@ pub const LIBRARY: &[Drill] = &[
         pause: DrillPause::Short,
         machine: MACHINE,
         players: &[at(2.7, 12.5), at(-2.7, 12.5)],
+        receivers: &[],
         balls: &[
             shaped(27, 2000, 0, 50, 1),
             shaped(18, 1500, 5, 40, 0),
@@ -611,6 +637,7 @@ pub const LIBRARY: &[Drill] = &[
         pause: DrillPause::Short,
         machine: MACHINE,
         players: &[at(-2.7, 12.5), at(2.7, 12.5)],
+        receivers: &[],
         balls: &[
             shaped(11, 2000, -6, 35, -2),
             shaped(20, 1500, 5, 30, 0),
@@ -630,6 +657,7 @@ pub const LIBRARY: &[Drill] = &[
         pause: DrillPause::Long,
         machine: MACHINE,
         players: &[at(-2.7, 12.5), at(2.7, 12.5)],
+        receivers: &[],
         balls: &[
             shaped(23, 2000, 0, 40, 1),
             shaped(17, 2000, -4, 35, 0),
@@ -651,6 +679,7 @@ pub const LIBRARY: &[Drill] = &[
         pause: DrillPause::Short,
         machine: MACHINE,
         players: &[at(-2.7, 3.0), at(2.7, 3.0)],
+        receivers: &[],
         balls: &[shaped(23, 3800, -10, 60, 0), shaped(27, 3800, -10, 60, 0)],
     },
 ];
@@ -714,6 +743,8 @@ mod tests {
     fn spots_are_on_the_court() {
         for d in LIBRARY {
             assert_eq!(d.players.len(), if d.doubles { 2 } else { 1 }, "{}: players", d.key);
+            assert!(d.receivers.is_empty() || d.receivers.len() == d.balls.len(), "{}: receivers", d.key);
+            assert!(d.receivers.iter().all(|&r| r < d.players.len()), "{}: receivers", d.key);
             for p in d.players.iter().chain([&d.machine]) {
                 assert!(p.x.abs() <= HALF_DOUBLES && (0.0..=14.0).contains(&p.y), "{}: {p:?}", d.key);
             }
