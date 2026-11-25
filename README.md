@@ -76,7 +76,8 @@ Web Bluetooth only works in **Chrome or Edge** (desktop or Android) on `https://
     each ball lands and leaves a numbered mark (ringed in the colour of the player it is for),
     the players run to where they hit each ball, and each hit shows the stroke (forehand,
     backhand, forehand/backhand volley, swing volley, smash) and a dashed line to where to play
-    it. The animation runs at about 0.6× the drill's real timing.
+    it. The animation runs at about 0.6× the drill's real timing and starts again from the first
+    ball every time the popup opens (hover, focus, or another tap on the name).
   - The animation works out who takes each ball, the stroke and where it is hit from the balls'
     height, speed and landing spot, assuming right-handers and crosscourt replies. A drill can
     fix these per ball (`receivers`, `strokes`, `hit_depths`), as poach and cover, run-around
