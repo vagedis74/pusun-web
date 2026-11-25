@@ -876,7 +876,7 @@ pub fn App() -> impl IntoView {
                 <PatternGroup title="Your own" pattern=pattern select=select options=vec![Pattern::Program(vec![]), Pattern::Custom(vec![])] />
 
                 <Show when=is_program>
-                    <p class="hint">{move || tr("Tap court points in play order (max ")} {p::MAX_SEQUENCE} "). Far side is at the top. 36–41 are your custom points."</p>
+                    <p class="hint">{move || tr("Tap court points in play order (max ")} {p::MAX_SEQUENCE} {move || tr("). Far side is at the top. 36–41 are your custom points.")}</p>
                     <div class="court">
                         {(0..5u8).rev().map(|row| view! {
                             <div class="court-row">
@@ -943,7 +943,7 @@ pub fn App() -> impl IntoView {
 
             <section id="vary-speed" style:display=move || if padel() { "none" } else { "" }>
                 <h2>{move || tr("Vary Speed")}</h2>
-                <p class="hint">{move || tr("Tap targets in play order (max ")} {p::MAX_DRILL_SHOTS} "), far side at the top. Each shot can be tuned below; settings belong to the point, so a repeated point plays the same."</p>
+                <p class="hint">{move || tr("Tap targets in play order (max ")} {p::MAX_DRILL_SHOTS} {move || tr("), far side at the top. Each shot can be tuned below; settings belong to the point, so a repeated point plays the same.")}</p>
                 <div class="court">
                     {(0..4u8).rev().map(|row| view! {
                         <div class="court-row">
@@ -1075,15 +1075,40 @@ fn PatternGroup(
             {options.into_iter().map(|opt| {
                 let label = opt.clone();
                 let same = opt.clone();
+                let same_help = opt.clone();
                 view! {
                     <span class="with-help"><button class="mode"
                         class:selected=move || std::mem::discriminant(&pattern.get()) == std::mem::discriminant(&same) && (matches!(same, Pattern::Program(_) | Pattern::Custom(_)) || pattern.get() == same)
                         on:click=move |_| select(opt.clone())>
                         {move || pattern_name(&label)}
-                    </button><Help topic="Pattern" /></span>
+                    </button><Help topic=pattern_help(&same_help) /></span>
                 }
             }).collect_view()}
         </div>
+    }
+}
+
+/// Help topic for a pattern button (see `ui::Help`).
+fn pattern_help(p: &Pattern) -> &'static str {
+    const LR: [&str; 5] = ["pat:lr1", "pat:lr2", "pat:lr3", "pat:lr4", "pat:lr5"];
+    const UD: [&str; 3] = ["pat:ud1", "pat:ud2", "pat:ud3"];
+    const CROSS: [&str; 6] = ["pat:cross1", "pat:cross2", "pat:cross3", "pat:cross4", "pat:cross5", "pat:cross6"];
+    let idx = |v: u8, n: usize| (v as usize).clamp(1, n) - 1;
+    match p {
+        Pattern::Fixed(v) => ["pat:fix1", "pat:fix2", "pat:fix3"][idx(*v, 3)],
+        Pattern::Volley(v) => ["pat:volley1", "pat:volley2", "pat:volley3"][idx(*v, 3)],
+        Pattern::Random => "pat:random",
+        Pattern::Primary => "pat:primary",
+        Pattern::Smash => "pat:smash",
+        Pattern::Moon => "pat:moon",
+        Pattern::Bandeja => "pat:bandeja",
+        Pattern::Bajada => "pat:bajada",
+        Pattern::ServeReturn => "pat:sreturn",
+        Pattern::Horizontal(v) => LR[idx(*v, 5)],
+        Pattern::Vertical(v) => UD[idx(*v, 3)],
+        Pattern::Cross(v) => CROSS[idx(*v, 6)],
+        Pattern::Program(_) => "pat:program",
+        Pattern::Custom(_) => "pat:custom",
     }
 }
 

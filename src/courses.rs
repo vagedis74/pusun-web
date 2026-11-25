@@ -169,22 +169,22 @@ fn subtitle_stem(url: &str) -> Option<&str> {
 
 #[cfg(target_arch = "wasm32")]
 #[component]
+/// One subtitle track that follows the app language. With two tracks, Chrome's automatic
+/// track selection could switch on the second one as well, showing both at once.
 fn SubtitleTracks(stem: String) -> impl IntoView {
-    use web_sys::TextTrackMode::{Disabled, Showing};
-
-    let en = NodeRef::<leptos::html::Track>::new();
-    let nl = NodeRef::<leptos::html::Track>::new();
-    Effect::new(move |_| {
-        let dutch = ui::dutch();
-        if let (Some(en), Some(nl)) = (en.get(), nl.get()) {
-            let (active, inactive) = if dutch { (nl, en) } else { (en, nl) };
-            if let Some(track) = inactive.track() { track.set_mode(Disabled); }
-            if let Some(track) = active.track() { track.set_mode(Showing); }
+    let track = NodeRef::<leptos::html::Track>::new();
+    let show = move || {
+        if let Some(t) = track.get_untracked().and_then(|el| el.track()) {
+            t.set_mode(web_sys::TextTrackMode::Showing);
         }
-    });
+    };
+    let lang = move || if ui::dutch() { "nl" } else { "en" };
     view! {
-        <track node_ref=en kind="subtitles" src=format!("subs/{stem}.en.vtt") srclang="en" label="English" />
-        <track node_ref=nl kind="subtitles" src=format!("subs/{stem}.nl.vtt") srclang="nl" label="Nederlands" />
+        <track node_ref=track kind="subtitles" default=true
+            src=move || format!("subs/{stem}.{}.vtt", lang())
+            srclang=lang
+            label=move || if ui::dutch() { "Nederlands" } else { "English" }
+            on:load=move |_| show() />
     }
 }
 
