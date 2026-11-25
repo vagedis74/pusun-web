@@ -164,6 +164,23 @@ pub const LIBRARY: &[Drill] = &[
         balls: &[shaped(4, 2000, 0, 50, -3), shaped(16, 1500, 10, 30, 0), shaped(20, 1500, 10, 30, 0)],
     },
     Drill {
+        key: "firststrike",
+        name: ("First strike", "Eerste klap"),
+        description: (
+            "Start on the baseline and work your way in. A deep ball in the middle: hit it early to a corner. A shorter, slower ball to the forehand: step in and go for the winner. A floater in the middle: take it out of the air with a swing volley. A short lob: smash it away. A long pause gives time to walk back.",
+            "Begin op de achterlijn en werk naar voren. Een diepe bal in het midden: neem hem vroeg en speel hem naar een hoek. Een kortere, tragere bal op de forehand: stap in en ga voor de winner. Een zwevende bal in het midden: sla hem uit de lucht met een swing volley. Een korte lob: smash hem weg. Een lange pauze geeft tijd om terug te lopen.",
+        ),
+        level: Level::Advanced,
+        doubles: false,
+        pause: DrillPause::Long,
+        balls: &[
+            shaped(25, 2000, 0, 40, 1),
+            shaped(13, 2000, -4, 35, 0),
+            shaped(18, 2800, -6, 35, 0),
+            shaped(11, 4000, -6, 50, 0),
+        ],
+    },
+    Drill {
         key: "lobsmash",
         name: ("Lob and smash", "Lob en smash"),
         description: (
