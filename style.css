@@ -89,3 +89,6 @@ main.disabled .help-dialog, .advanced.disabled .help-dialog { pointer-events: au
 .level-beginner { color: #2f8f46; }
 .level-intermediate { color: #b7791f; }
 .level-advanced { color: var(--stop); }
+.difficulty { gap: .3rem; }
+.difficulty button.mode { min-width: 2.6rem; }
+.difficulty-name { margin-left: .2rem; }

@@ -7,7 +7,7 @@ use leptos::task::spawn_local;
 
 use crate::ble::Machine;
 use crate::courses::Courses;
-use crate::drills::{Drill, LIBRARY};
+use crate::drills::{self, DIFFICULTIES, Drill, LIBRARY};
 use crate::protocol::{self as p, AiOptions, CustomPoint, DrillPause, DrillPoint, Frame, Height, Notification, Pattern, PatternDefault, ProgramSettings, RawPoint, Sport};
 
 /// A frame and the delay before sending it, mirroring the app's `postDelayed` gaps.
@@ -18,6 +18,7 @@ const ROUTES_KEY: &str = "pusun-web.routes";
 const DEFAULTS_KEY: &str = "pusun-web.pattern-defaults";
 const ADVANCED_KEY: &str = "pusun-web.advanced";
 const SPORT_KEY: &str = "pusun-web.sport";
+const DIFFICULTY_KEY: &str = "pusun-web.drill-difficulty";
 const PADEL_CUSTOM_KEY: &str = "pusun-web.padel.custom-points";
 
 fn custom_key(sport: Sport) -> &'static str {
@@ -607,10 +608,23 @@ pub fn App() -> impl IntoView {
         ctx.run(frames.into_iter().map(|f| (50, f)).collect());
     };
     let start_drill = move |_| start_current_drill();
-    // Built-in drills load into Vary Speed like a saved route.
+    // Built-in drills load into Vary Speed like a saved route, at the chosen difficulty.
+    let difficulty = RwSignal::new(
+        storage()
+            .and_then(|s| s.get_item(DIFFICULTY_KEY).ok().flatten())
+            .and_then(|v| v.parse::<u8>().ok())
+            .filter(|v| (1..=5).contains(v))
+            .unwrap_or(drills::NORMAL),
+    );
+    let set_difficulty = move |level: u8| {
+        difficulty.set(level);
+        if let Some(st) = storage() {
+            let _ = st.set_item(DIFFICULTY_KEY, &level.to_string());
+        }
+    };
     let load_library_drill = move |d: &'static Drill| {
         drill_params.update(|params| {
-            for (id, pt) in d.params() {
+            for (id, pt) in d.params_at(difficulty.get_untracked()) {
                 params[(id - 1) as usize] = pt;
             }
         });
@@ -1033,6 +1047,19 @@ pub fn App() -> impl IntoView {
         <section id="drills" style:display=move || if padel() { "none" } else { "" }>
             <h2>{move || tr("Drills")}</h2>
             <p class="hint">{move || tr("Ready-made tennis drills for one player or a doubles pair. Start plays one straight away; Edit opens it in Vary Speed so you can tune each ball first.")}</p>
+            <div class="row difficulty" role="group" aria-label=move || tr("Difficulty")>
+                <span class="with-help">{move || tr("Difficulty")} <Help topic="Difficulty" /></span>
+                {DIFFICULTIES.into_iter().map(|(level, en, nl)| view! {
+                    <button class="mode" class:selected=move || difficulty.get() == level
+                        aria-pressed=move || (difficulty.get() == level).to_string()
+                        title=move || if ui::dutch() { nl } else { en }
+                        on:click=move |_| set_difficulty(level)>{level}</button>
+                }).collect_view()}
+                <strong class="difficulty-name">{move || {
+                    let (_, en, nl) = DIFFICULTIES[(difficulty.get() - 1) as usize];
+                    if ui::dutch() { nl } else { en }
+                }}</strong>
+            </div>
             {[(false, "Singles"), (true, "Doubles")].into_iter().map(|(doubles, heading)| view! {
                 <h3>{move || tr(heading)}</h3>
                 <div class="drills">
@@ -1047,7 +1074,15 @@ pub fn App() -> impl IntoView {
                                     <span class=format!("level level-{}", d.level.label().0.to_lowercase())>{level}</span>
                                 </div>
                                 <p>{move || if ui::dutch() { d.description.1 } else { d.description.0 }}</p>
-                                <small class="hint">{move || format!("{balls} {}", if balls == 1 { tr("ball") } else { tr("balls") })}</small>
+                                <small class="hint">{move || {
+                                    let (lo, hi) = drills::interval_range(&d.params_at(difficulty.get()));
+                                    let secs = |t: u8| {
+                                        let s = format!("{:.1}", t as f32 / 10.0);
+                                        if ui::dutch() { s.replace('.', ",") } else { s }
+                                    };
+                                    let gap = if lo == hi { secs(lo) } else { format!("{}–{}", secs(lo), secs(hi)) };
+                                    format!("{balls} {} · {} {gap} s", if balls == 1 { tr("ball") } else { tr("balls") }, tr("every"))
+                                }}</small>
                                 <div class="row">
                                     <span class="with-help"><button class="primary" disabled=move || !connected()
                                         on:click=move |_| { load_library_drill(d); start_current_drill(); }>{move || tr("Start")}</button><Help topic="Drill start" /></span>

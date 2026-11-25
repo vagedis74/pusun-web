@@ -43,6 +43,21 @@ const fn shaped(point: u8, height: u16, speed: i8, interval: u8, spin: i8) -> Ba
     Ball { point, height: Some(height), speed, interval, spin }
 }
 
+/// Difficulty 1..=5. Each drill is written at [`NORMAL`]; every step up feeds the
+/// next ball 0.5 s sooner and a little faster, every step down the opposite.
+pub const DIFFICULTIES: [(u8, &str, &str); 5] = [
+    (1, "Very easy", "Heel makkelijk"),
+    (2, "Easy", "Makkelijk"),
+    (3, "Normal", "Normaal"),
+    (4, "Hard", "Moeilijk"),
+    (5, "Very hard", "Heel moeilijk"),
+];
+pub const NORMAL: u8 = 3;
+/// Interval change per difficulty step, in tenths of a second.
+const INTERVAL_STEP: i16 = 5;
+/// Speed change per difficulty step. Kept small: speed also sets how deep a ball lands.
+const SPEED_STEP: i16 = 3;
+
 pub struct Drill {
     pub key: &'static str,
     pub name: (&'static str, &'static str),
@@ -60,8 +75,9 @@ impl Drill {
         self.balls.iter().map(|b| b.point).collect()
     }
 
-    /// Settings for each point the drill uses.
-    pub fn params(&self) -> Vec<(u8, DrillPoint)> {
+    /// Settings for each point the drill uses at `difficulty` (1..=5), clamped to the machine's ranges.
+    pub fn params_at(&self, difficulty: u8) -> Vec<(u8, DrillPoint)> {
+        let step = difficulty.clamp(1, 5) as i16 - NORMAL as i16;
         let defaults = DrillPoint::defaults();
         self.balls
             .iter()
@@ -70,8 +86,8 @@ impl Drill {
                 let p = DrillPoint {
                     lr: d.lr,
                     ud: b.height.unwrap_or(d.ud),
-                    speed: (d.speed as i16 + b.speed as i16) as u8,
-                    interval: b.interval,
+                    speed: (d.speed as i16 + b.speed as i16 + SPEED_STEP * step).max(0) as u8,
+                    interval: (b.interval as i16 - INTERVAL_STEP * step).max(0) as u8,
                     spin: (50 + 5 * b.spin as i16) as u8,
                 };
                 (b.point, p.clamped())
@@ -80,13 +96,19 @@ impl Drill {
     }
 }
 
+/// Shortest and longest gap between balls in `params`, in tenths of a second.
+pub fn interval_range(params: &[(u8, DrillPoint)]) -> (u8, u8) {
+    let it = params.iter().map(|(_, p)| p.interval);
+    (it.clone().min().unwrap_or(0), it.max().unwrap_or(0))
+}
+
 pub const LIBRARY: &[Drill] = &[
     Drill {
         key: "warmup",
         name: ("Warm-up rally", "Warming-up rally"),
         description: (
-            "Calm balls just left and right of centre, 5 s apart. Find your rhythm on both sides before anything faster.",
-            "Rustige ballen net links en rechts van het midden, 5 s na elkaar. Vind je ritme aan beide kanten voordat het sneller gaat.",
+            "Calm balls just left and right of centre. Find your rhythm on both sides before anything faster.",
+            "Rustige ballen net links en rechts van het midden. Vind je ritme aan beide kanten voordat het sneller gaat.",
         ),
         level: Level::Beginner,
         doubles: false,
@@ -109,8 +131,8 @@ pub const LIBRARY: &[Drill] = &[
         key: "corners",
         name: ("Corner to corner", "Hoek naar hoek"),
         description: (
-            "Deep balls to both corners, 3.5 s apart. Recover to the centre mark after every shot.",
-            "Diepe ballen naar beide hoeken, 3,5 s na elkaar. Herstel na elke slag naar het midden.",
+            "Deep balls to both corners. Recover to the centre mark after every shot.",
+            "Diepe ballen naar beide hoeken. Herstel na elke slag naar het midden.",
         ),
         level: Level::Advanced,
         doubles: false,
@@ -145,8 +167,8 @@ pub const LIBRARY: &[Drill] = &[
         key: "lobsmash",
         name: ("Lob and smash", "Lob en smash"),
         description: (
-            "High, slow lobs left and right of centre, 6 s apart. Stand near the net, turn sideways and smash.",
-            "Hoge, langzame lobs links en rechts van het midden, 6 s na elkaar. Sta dicht bij het net, draai zijwaarts en smash.",
+            "High, slow lobs left and right of centre. Stand near the net, turn sideways and smash.",
+            "Hoge, langzame lobs links en rechts van het midden. Sta dicht bij het net, draai zijwaarts en smash.",
         ),
         level: Level::Intermediate,
         doubles: false,
@@ -193,8 +215,8 @@ pub const LIBRARY: &[Drill] = &[
         key: "pressure",
         name: ("Pressure feed", "Onder druk"),
         description: (
-            "Six faster balls all over the court, 3 s apart, then a long pause. Play every ball back deep, however you get there.",
-            "Zes snellere ballen over de hele baan, 3 s na elkaar, dan een lange pauze. Speel elke bal diep terug, hoe je er ook komt.",
+            "Six faster balls all over the court, then a long pause. Play every ball back deep, however you get there.",
+            "Zes snellere ballen over de hele baan, dan een lange pauze. Speel elke bal diep terug, hoe je er ook komt.",
         ),
         level: Level::Advanced,
         doubles: false,
@@ -213,8 +235,8 @@ pub const LIBRARY: &[Drill] = &[
         key: "middle",
         name: ("Down the middle", "Door het midden"),
         description: (
-            "Both players on the baseline. Calm balls through the middle, 5 s apart. Call who takes each one; usually the player with the forehand in the middle.",
-            "Beide spelers op de achterlijn. Rustige ballen door het midden, 5 s na elkaar. Roep wie hem neemt; meestal de speler met de forehand in het midden.",
+            "Both players on the baseline. Calm balls through the middle. Call who takes each one; usually the player with the forehand in the middle.",
+            "Beide spelers op de achterlijn. Rustige ballen door het midden. Roep wie hem neemt; meestal de speler met de forehand in het midden.",
         ),
         level: Level::Beginner,
         doubles: true,
@@ -261,8 +283,8 @@ pub const LIBRARY: &[Drill] = &[
         key: "netpair",
         name: ("Both at the net", "Samen aan het net"),
         description: (
-            "Both players at the net. Fast, low balls left, middle, right, middle, 2.5 s apart. Keep the volleys low and agree who takes the middle ball.",
-            "Beide spelers aan het net. Snelle, lage ballen links, midden, rechts, midden, 2,5 s na elkaar. Houd de volleys laag en spreek af wie de middelste bal neemt.",
+            "Both players at the net. Fast, low balls left, middle, right, middle. Keep the volleys low and agree who takes the middle ball.",
+            "Beide spelers aan het net. Snelle, lage ballen links, midden, rechts, midden. Houd de volleys laag en spreek af wie de middelste bal neemt.",
         ),
         level: Level::Advanced,
         doubles: true,
@@ -278,8 +300,8 @@ pub const LIBRARY: &[Drill] = &[
         key: "lobswitch",
         name: ("Lob and switch", "Lob en wissel"),
         description: (
-            "Both players at the net. High lobs over the left and right player, 6 s apart. The partner crosses behind to chase the lob while the lobbed player switches sides.",
-            "Beide spelers aan het net. Hoge lobs over de linker- en rechterspeler, 6 s na elkaar. De partner loopt erachter langs om de lob te halen en de gelobde speler wisselt van kant.",
+            "Both players at the net. High lobs over the left and right player. The partner crosses behind to chase the lob while the lobbed player switches sides.",
+            "Beide spelers aan het net. Hoge lobs over de linker- en rechterspeler. De partner loopt erachter langs om de lob te halen en de gelobde speler wisselt van kant.",
         ),
         level: Level::Intermediate,
         doubles: true,
@@ -302,7 +324,7 @@ mod tests {
                 assert!((-6..=6).contains(&b.spin), "{}: spin", d.key);
             }
             // Out-of-range values would be clamped silently; keep the library exact.
-            for (id, p) in d.params() {
+            for (id, p) in d.params_at(NORMAL) {
                 assert_eq!(p, p.clamped(), "{}: point {id} out of range", d.key);
                 let grid = DrillPoint::defaults()[(id - 1) as usize];
                 assert_eq!(p.lr, grid.lr, "{}: aim comes from the grid", d.key);
@@ -314,10 +336,27 @@ mod tests {
     #[test]
     fn repeated_points_agree() {
         for d in LIBRARY {
-            let params = d.params();
-            for (id, p) in &params {
-                assert!(params.iter().all(|(j, q)| j != id || q == p), "{}: point {id} differs", d.key);
+            for (level, ..) in DIFFICULTIES {
+                let params = d.params_at(level);
+                for (id, p) in &params {
+                    assert!(params.iter().all(|(j, q)| j != id || q == p), "{}: point {id} differs", d.key);
+                }
             }
+        }
+    }
+
+    #[test]
+    fn difficulty_never_eases_with_level() {
+        for d in LIBRARY {
+            for w in DIFFICULTIES.windows(2) {
+                for ((_, easier), (_, harder)) in d.params_at(w[0].0).iter().zip(d.params_at(w[1].0)) {
+                    assert!(harder.interval <= easier.interval && harder.speed >= easier.speed, "{}", d.key);
+                    assert_eq!(harder, harder.clamped(), "{}: clamped", d.key);
+                }
+            }
+            // Easiest and hardest must actually differ in tempo.
+            let (easy, hard) = (d.params_at(1), d.params_at(5));
+            assert!(easy.iter().zip(&hard).any(|((_, a), (_, b))| a.interval > b.interval), "{}", d.key);
         }
     }
 
