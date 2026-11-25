@@ -10,6 +10,7 @@ use gloo_timers::future::TimeoutFuture;
 use js_sys::{DataView, JsString, Uint8Array};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
+use wasm_bindgen_futures::JsFuture;
 use web_sys::{
     BluetoothDevice, BluetoothLeScanFilterInit, BluetoothRemoteGattCharacteristic, RequestDeviceOptions,
 };
@@ -39,6 +40,7 @@ fn js_err(e: JsValue) -> String {
 
 const CONNECT_ATTEMPTS: u32 = 3;
 const CONNECT_TIMEOUT_MS: u32 = 15_000;
+const NOTIFY_TIMEOUT_MS: u32 = 4_000;
 
 /// Connects GATT and looks up the write and notify characteristics.
 async fn open_gatt(
@@ -150,7 +152,24 @@ impl Machine {
         });
         notify.set_oncharacteristicvaluechanged(Some(on_notify.as_ref().unchecked_ref()));
         log("Starting notifications".into());
-        let _: BluetoothRemoteGattCharacteristic = notify.start_notifications().await.map_err(js_err)?;
+        // On Android, Chrome can wait forever for the machine to confirm the notification
+        // subscription. Commands do not depend on it (only battery and fault reports do),
+        // so stop waiting after a few seconds and keep the connection.
+        let started = JsFuture::from(notify.start_notifications()).map(|r| match r {
+            Ok(_) => "Notifications on".to_string(),
+            Err(e) => format!("Notifications failed: {}; battery and fault reports unavailable", js_err(e)),
+        });
+        let timeout = TimeoutFuture::new(NOTIFY_TIMEOUT_MS).map(|_| {
+            format!(
+                "No reply when starting notifications after {} s; continuing without battery and fault reports",
+                NOTIFY_TIMEOUT_MS / 1000
+            )
+        });
+        let line = futures::select! {
+            l = started.fuse() => l,
+            l = timeout.fuse() => l,
+        };
+        log(line);
 
         let on_disconnect = Closure::<dyn FnMut(web_sys::Event)>::new(move |_| on_disconnect());
         device.set_ongattserverdisconnected(Some(on_disconnect.as_ref().unchecked_ref()));
