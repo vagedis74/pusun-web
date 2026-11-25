@@ -313,9 +313,10 @@ fn return_path(timing: &Timing, who: &[usize], shots: &[Shot], dutch: bool) -> S
             b = k(hit_at + RETURN_FLIGHT),
         );
         s += &format!(
-            r##"<text x="{}" y="{}" font-size=".8" font-family="system-ui,sans-serif" font-weight="700" fill="#fff" stroke="#000" stroke-width=".18" paint-order="stroke" text-anchor="middle" opacity="0">{}{show}</text>"##,
-            h.x.clamp(-3.8, 3.8),
-            (h.y + 1.3).min(14.5),
+            r##"<text x="{}" y="{}" font-size="1.05" font-family="system-ui,sans-serif" font-weight="700" fill="#fff" stroke="#000" stroke-width=".24" paint-order="stroke" text-anchor="middle" opacity="0">{}{show}</text>"##,
+            // Kept clear of the edges: the longest name ("Backhandvolley") is about 8.5 wide.
+            h.x.clamp(-2.6, 2.6),
+            (h.y + 1.5).min(14.4),
             if dutch { shot.name.1 } else { shot.name.0 }
         );
     }
