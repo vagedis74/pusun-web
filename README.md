@@ -52,6 +52,12 @@ Web Bluetooth only works in **Chrome or Edge** (desktop or Android) on `https://
   save and load named point sets (all six points plus the play order)
 - Vary Speed drills: up to 15 shots on a 7×4 target grid, each shot tunable (aim, height,
   speed, interval, spin; changes are sent live), optional pause before repeating
+- Aim display: in the custom point and Vary Speed editors, left/right aim is shown as a percentage
+  from the centre column, "L 25%" or "R 25%", where 100% is the machine's limit on that side
+  (custom points: 1140 centre, 2070 / 210 limits; Vary Speed: 1200 centre, 2370 / 90 limits, so
+  its outer grid columns show L 79% and R 84%). The machine's own values are unitless positions;
+  see `drill_lr_percent` and `custom_lr_percent` in `src/protocol.rs`. Height is shown as in the
+  app: the raw value for custom points, the value / 100 in Vary Speed.
 - Saved routes (name, order, pause, shot settings) stored in the browser
 - Drills (tennis): a built-in library (`src/drills.rs`), each drill with a level and description.
   - Twelve singles drills: warm-up rally, deep consistency, corner to corner, run-around forehand,
