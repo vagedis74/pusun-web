@@ -328,6 +328,23 @@ pub const LIBRARY: &[Drill] = &[
         ],
     },
     Drill {
+        key: "storm",
+        name: ("Storm the net", "Stormloop naar het net"),
+        description: (
+            "Both players on the baseline, one per half. A short, sliced ball in the middle: attack it with the forehand and both move in together. Then a firm volley to the right, a low volley to the left, and a high, soft ball in the middle to put away. Never back off; finish every point at the net.",
+            "Beide spelers op de achterlijn, één per helft. Een korte bal met slice in het midden: val aan met de forehand en ga samen naar voren. Dan een stevige volley rechts, een lage volley links en een hoge, zachte bal in het midden om af te maken. Nooit terugwijken; maak elk punt af aan het net.",
+        ),
+        level: Level::Advanced,
+        doubles: true,
+        pause: DrillPause::Short,
+        balls: &[
+            shaped(11, 2000, -6, 35, -2),
+            shaped(20, 1500, 5, 30, 0),
+            shaped(16, 1500, 5, 30, 0),
+            shaped(18, 3200, -8, 45, 0),
+        ],
+    },
+    Drill {
         key: "lobswitch",
         name: ("Lob and switch", "Lob en wissel"),
         description: (
