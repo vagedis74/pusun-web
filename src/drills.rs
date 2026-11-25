@@ -43,6 +43,65 @@ const fn shaped(point: u8, height: u16, speed: i8, interval: u8, spin: i8) -> Ba
     Ball { point, height: Some(height), speed, interval, spin }
 }
 
+/// A spot on the court in metres, as seen by the players facing the net: `x` from the
+/// centre line (negative is left; doubles sidelines at ±5.49), `y` from the net (baseline
+/// at 11.89). For the machine, `y` is measured from the net into the far half.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Spot {
+    pub x: f32,
+    pub y: f32,
+}
+
+const fn at(x: f32, y: f32) -> Spot {
+    Spot { x, y }
+}
+
+/// Centre of the far baseline, about 1 m behind it. The grid's aim values assume this
+/// spot: moved sideways, every ball lands off target.
+pub const MACHINE: Spot = at(0.0, 12.9);
+
+const HALF_LENGTH: f32 = 11.885;
+const HALF_DOUBLES: f32 = 5.485;
+const HALF_SINGLES: f32 = 4.115;
+const SERVICE: f32 = 6.4;
+
+/// The court seen from above, machine side at the top, as an SVG document.
+pub fn court_svg(d: &Drill) -> String {
+    let line = |x1: f32, y1: f32, x2: f32, y2: f32| {
+        format!(r#"<line x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}"/>"#)
+    };
+    let mut s = format!(
+        r##"<svg class="court" viewBox="-7 -15 14 30" role="img" xmlns="http://www.w3.org/2000/svg"><rect x="-7" y="-15" width="14" height="30" rx=".4" fill="#2f6e3f"/><g stroke="#fff" stroke-width=".1" fill="none"><rect x="{}" y="{}" width="{}" height="{}"/>"##,
+        -HALF_DOUBLES, -HALF_LENGTH, 2.0 * HALF_DOUBLES, 2.0 * HALF_LENGTH
+    );
+    for x in [-HALF_SINGLES, HALF_SINGLES] {
+        s += &line(x, -HALF_LENGTH, x, HALF_LENGTH);
+    }
+    for y in [-SERVICE, SERVICE] {
+        s += &line(-HALF_SINGLES, y, HALF_SINGLES, y);
+    }
+    s += &line(0.0, -SERVICE, 0.0, SERVICE);
+    s += &line(0.0, -HALF_LENGTH, 0.0, -HALF_LENGTH + 0.3);
+    s += &line(0.0, HALF_LENGTH, 0.0, HALF_LENGTH - 0.3);
+    s += r##"</g><line x1="-6.2" y1="0" x2="6.2" y2="0" stroke="#ddd" stroke-width=".2" stroke-dasharray=".25 .15"/>"##;
+    let m = d.machine;
+    s += &format!(
+        r##"<rect x="{}" y="{}" width="1.4" height="1" rx=".15" fill="#e67e22" stroke="#000" stroke-width=".08"/>"##,
+        m.x - 0.7,
+        -m.y - 0.5
+    );
+    for (i, p) in d.players.iter().enumerate() {
+        let fill = if i == 0 { "#2b6cb0" } else { "#b7791f" };
+        s += &format!(
+            r##"<circle cx="{x}" cy="{y}" r=".6" fill="{fill}" stroke="#fff" stroke-width=".08"/><text x="{x}" y="{y}" font-size=".8" font-family="system-ui,sans-serif" font-weight="700" fill="#fff" text-anchor="middle" dominant-baseline="central">{n}</text>"##,
+            x = p.x,
+            y = p.y,
+            n = i + 1
+        );
+    }
+    s + "</svg>"
+}
+
 /// Difficulty 1..=5. Each drill is written at [`NORMAL`]; every step up feeds the
 /// next ball 0.5 s sooner and a little faster, every step down the opposite.
 pub const DIFFICULTIES: [(u8, &str, &str); 5] = [
@@ -67,6 +126,10 @@ pub struct Drill {
     pub doubles: bool,
     pub pause: DrillPause,
     balls: &'static [Ball],
+    /// Where to put the machine on the far side.
+    pub machine: Spot,
+    /// Where each player starts: the player who gets the first ball, then the partner.
+    pub players: &'static [Spot],
 }
 
 impl Drill {
@@ -113,6 +176,8 @@ pub const LIBRARY: &[Drill] = &[
         level: Level::Beginner,
         doubles: false,
         pause: DrillPause::None,
+        machine: MACHINE,
+        players: &[at(0.0, 12.5)],
         balls: &[ball(17, 50), ball(19, 50)],
     },
     Drill {
@@ -125,6 +190,8 @@ pub const LIBRARY: &[Drill] = &[
         level: Level::Intermediate,
         doubles: false,
         pause: DrillPause::None,
+        machine: MACHINE,
+        players: &[at(0.0, 12.5)],
         balls: &[shaped(23, 2000, 0, 40, 2), shaped(27, 2000, 0, 40, 2)],
     },
     Drill {
@@ -137,6 +204,8 @@ pub const LIBRARY: &[Drill] = &[
         level: Level::Advanced,
         doubles: false,
         pause: DrillPause::Short,
+        machine: MACHINE,
+        players: &[at(0.0, 12.5)],
         balls: &[shaped(22, 2000, 0, 35, 1), shaped(28, 2000, 0, 35, 1)],
     },
     Drill {
@@ -149,6 +218,8 @@ pub const LIBRARY: &[Drill] = &[
         level: Level::Intermediate,
         doubles: false,
         pause: DrillPause::Short,
+        machine: MACHINE,
+        players: &[at(0.0, 12.5)],
         balls: &[ball(24, 45), ball(24, 45), ball(28, 45)],
     },
     Drill {
@@ -161,6 +232,8 @@ pub const LIBRARY: &[Drill] = &[
         level: Level::Intermediate,
         doubles: false,
         pause: DrillPause::Long,
+        machine: MACHINE,
+        players: &[at(0.0, 12.5)],
         balls: &[shaped(4, 2000, 0, 50, -3), shaped(16, 1500, 10, 30, 0), shaped(20, 1500, 10, 30, 0)],
     },
     Drill {
@@ -173,6 +246,8 @@ pub const LIBRARY: &[Drill] = &[
         level: Level::Advanced,
         doubles: false,
         pause: DrillPause::Long,
+        machine: MACHINE,
+        players: &[at(0.0, 12.5)],
         balls: &[
             shaped(25, 2000, 0, 40, 1),
             shaped(13, 2000, -4, 35, 0),
@@ -190,6 +265,8 @@ pub const LIBRARY: &[Drill] = &[
         level: Level::Intermediate,
         doubles: false,
         pause: DrillPause::Short,
+        machine: MACHINE,
+        players: &[at(0.0, 6.4)],
         balls: &[
             shaped(2, 1500, -20, 30, -3),
             shaped(9, 1500, 5, 35, 0),
@@ -207,6 +284,8 @@ pub const LIBRARY: &[Drill] = &[
         level: Level::Intermediate,
         doubles: false,
         pause: DrillPause::Short,
+        machine: MACHINE,
+        players: &[at(0.0, 3.0)],
         balls: &[shaped(10, 4000, -6, 60, 0), shaped(12, 4000, -6, 60, 0)],
     },
     Drill {
@@ -219,6 +298,8 @@ pub const LIBRARY: &[Drill] = &[
         level: Level::Advanced,
         doubles: false,
         pause: DrillPause::Short,
+        machine: MACHINE,
+        players: &[at(0.0, 13.0)],
         balls: &[shaped(22, 2600, 0, 45, 5), shaped(25, 2600, 0, 45, 5), shaped(28, 2600, 0, 45, 5)],
     },
     Drill {
@@ -231,6 +312,8 @@ pub const LIBRARY: &[Drill] = &[
         level: Level::Intermediate,
         doubles: false,
         pause: DrillPause::None,
+        machine: MACHINE,
+        players: &[at(0.0, 12.5)],
         balls: &[shaped(9, 1600, 0, 45, -4), shaped(13, 1600, 0, 45, -4)],
     },
     Drill {
@@ -243,6 +326,8 @@ pub const LIBRARY: &[Drill] = &[
         level: Level::Advanced,
         doubles: false,
         pause: DrillPause::Short,
+        machine: MACHINE,
+        players: &[at(0.0, 12.5)],
         balls: &[ball(22, 40), ball(4, 40), ball(28, 40), ball(4, 40)],
     },
     Drill {
@@ -255,6 +340,8 @@ pub const LIBRARY: &[Drill] = &[
         level: Level::Advanced,
         doubles: false,
         pause: DrillPause::Long,
+        machine: MACHINE,
+        players: &[at(0.0, 12.5)],
         balls: &[
             shaped(22, 2000, 5, 30, 1),
             shaped(26, 2000, 5, 30, 1),
@@ -275,6 +362,8 @@ pub const LIBRARY: &[Drill] = &[
         level: Level::Beginner,
         doubles: true,
         pause: DrillPause::None,
+        machine: MACHINE,
+        players: &[at(-2.7, 12.5), at(2.7, 12.5)],
         balls: &[shaped(16, 2000, -6, 50, 0), shaped(20, 2000, -6, 50, 0)],
     },
     Drill {
@@ -287,6 +376,8 @@ pub const LIBRARY: &[Drill] = &[
         level: Level::Beginner,
         doubles: true,
         pause: DrillPause::None,
+        machine: MACHINE,
+        players: &[at(-2.7, 12.5), at(2.7, 12.5)],
         balls: &[ball(25, 50), ball(18, 50)],
     },
     Drill {
@@ -299,6 +390,8 @@ pub const LIBRARY: &[Drill] = &[
         level: Level::Intermediate,
         doubles: true,
         pause: DrillPause::None,
+        machine: MACHINE,
+        players: &[at(2.7, 12.5), at(-2.7, 12.5)],
         balls: &[shaped(27, 2000, 0, 40, 1), shaped(23, 2000, 0, 40, 1)],
     },
     Drill {
@@ -311,6 +404,8 @@ pub const LIBRARY: &[Drill] = &[
         level: Level::Intermediate,
         doubles: true,
         pause: DrillPause::None,
+        machine: MACHINE,
+        players: &[at(2.7, 12.5), at(-2.7, 3.0)],
         balls: &[shaped(27, 2000, 0, 35, 1), shaped(16, 1500, 10, 40, 0)],
     },
     Drill {
@@ -323,6 +418,8 @@ pub const LIBRARY: &[Drill] = &[
         level: Level::Advanced,
         doubles: true,
         pause: DrillPause::Short,
+        machine: MACHINE,
+        players: &[at(-2.7, 3.0), at(2.7, 12.5)],
         balls: &[shaped(18, 1500, 10, 40, 0), shaped(22, 2000, 0, 45, 1)],
     },
     Drill {
@@ -335,6 +432,8 @@ pub const LIBRARY: &[Drill] = &[
         level: Level::Advanced,
         doubles: true,
         pause: DrillPause::Short,
+        machine: MACHINE,
+        players: &[at(-2.7, 3.0), at(2.7, 3.0)],
         balls: &[
             shaped(16, 1500, 10, 25, 0),
             shaped(18, 1500, 10, 25, 0),
@@ -352,6 +451,8 @@ pub const LIBRARY: &[Drill] = &[
         level: Level::Advanced,
         doubles: true,
         pause: DrillPause::Short,
+        machine: MACHINE,
+        players: &[at(2.7, 12.5), at(-2.7, 12.5)],
         balls: &[
             shaped(27, 2000, 0, 50, 1),
             shaped(18, 1500, 5, 40, 0),
@@ -371,6 +472,8 @@ pub const LIBRARY: &[Drill] = &[
         level: Level::Advanced,
         doubles: true,
         pause: DrillPause::Short,
+        machine: MACHINE,
+        players: &[at(-2.7, 12.5), at(2.7, 12.5)],
         balls: &[
             shaped(11, 2000, -6, 35, -2),
             shaped(20, 1500, 5, 30, 0),
@@ -388,6 +491,8 @@ pub const LIBRARY: &[Drill] = &[
         level: Level::Advanced,
         doubles: true,
         pause: DrillPause::Long,
+        machine: MACHINE,
+        players: &[at(-2.7, 12.5), at(2.7, 12.5)],
         balls: &[
             shaped(23, 2000, 0, 40, 1),
             shaped(17, 2000, -4, 35, 0),
@@ -407,6 +512,8 @@ pub const LIBRARY: &[Drill] = &[
         level: Level::Intermediate,
         doubles: true,
         pause: DrillPause::Short,
+        machine: MACHINE,
+        players: &[at(-2.7, 3.0), at(2.7, 3.0)],
         balls: &[shaped(23, 3800, -10, 60, 0), shaped(27, 3800, -10, 60, 0)],
     },
 ];
@@ -464,6 +571,16 @@ mod tests {
     #[test]
     fn has_singles_and_doubles() {
         assert!(LIBRARY.iter().any(|d| d.doubles) && LIBRARY.iter().any(|d| !d.doubles));
+    }
+
+    #[test]
+    fn spots_are_on_the_court() {
+        for d in LIBRARY {
+            assert_eq!(d.players.len(), if d.doubles { 2 } else { 1 }, "{}: players", d.key);
+            for p in d.players.iter().chain([&d.machine]) {
+                assert!(p.x.abs() <= HALF_DOUBLES && (0.0..=14.0).contains(&p.y), "{}: {p:?}", d.key);
+            }
+        }
     }
 
     #[test]
