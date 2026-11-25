@@ -4,7 +4,9 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
+use futures::FutureExt;
 use futures::lock::Mutex;
+use gloo_timers::future::TimeoutFuture;
 use js_sys::{DataView, JsString, Uint8Array};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -35,6 +37,39 @@ fn js_err(e: JsValue) -> String {
         .unwrap_or_else(|| format!("{e:?}"))
 }
 
+const CONNECT_ATTEMPTS: u32 = 3;
+const CONNECT_TIMEOUT_MS: u32 = 15_000;
+
+/// Connects GATT and looks up the write and notify characteristics.
+async fn open_gatt(
+    device: &BluetoothDevice,
+    uuids: &Uuids,
+    log: &impl Fn(String),
+) -> Result<(BluetoothRemoteGattCharacteristic, BluetoothRemoteGattCharacteristic), String> {
+    let server = device.gatt().ok_or("device has no GATT server")?;
+    let server: web_sys::BluetoothRemoteGattServer =
+        server.connect().await.map_err(|e| format!("GATT connect: {}", js_err(e)))?;
+    log("GATT connected; looking up services".into());
+    let step = |what: &str, e: JsValue| format!("{what}: {}", js_err(e));
+    let wsvc: web_sys::BluetoothRemoteGattService = server
+        .get_primary_service_with_str(&uuid16(uuids.write_service))
+        .await
+        .map_err(|e| step(&format!("service {:04X}", uuids.write_service), e))?;
+    let write: BluetoothRemoteGattCharacteristic = wsvc
+        .get_characteristic_with_str(&uuid16(uuids.write_char))
+        .await
+        .map_err(|e| step(&format!("characteristic {:04X}", uuids.write_char), e))?;
+    let nsvc: web_sys::BluetoothRemoteGattService = server
+        .get_primary_service_with_str(&uuid16(uuids.notify_service))
+        .await
+        .map_err(|e| step(&format!("service {:04X}", uuids.notify_service), e))?;
+    let notify: BluetoothRemoteGattCharacteristic = nsvc
+        .get_characteristic_with_str(&uuid16(uuids.notify_char))
+        .await
+        .map_err(|e| step(&format!("characteristic {:04X}", uuids.notify_char), e))?;
+    Ok((write, notify))
+}
+
 pub struct Machine {
     pub name: String,
     device: BluetoothDevice,
@@ -47,9 +82,11 @@ pub struct Machine {
 
 impl Machine {
     /// Shows the browser's device picker and connects to the chosen machine.
+    /// `log` receives each step, so a failure on the phone shows where it stopped.
     pub async fn connect(
         on_notify: impl Fn(Vec<u8>) + 'static,
         on_disconnect: impl Fn() + 'static,
+        log: impl Fn(String),
     ) -> Result<Rc<Machine>, String> {
         let bluetooth = web_sys::window()
             .and_then(|w| w.navigator().bluetooth())
@@ -63,21 +100,44 @@ impl Machine {
             [0xFFF0, 0xFFE0, 0xFFE5].iter().map(|s| JsString::from(uuid16(*s))).collect();
         options.set_optional_services(&services);
 
+        log("Opening device chooser".into());
         let device: BluetoothDevice = bluetooth.request_device(&options).await.map_err(js_err)?;
         let name = device.name().unwrap_or_default();
         let uuids = if protocol::uses_alt_services(&name) { ALT } else { MAIN };
+        log(format!(
+            "Selected {name}; using services {:04X}/{:04X}",
+            uuids.write_service, uuids.notify_service
+        ));
 
-        let server = device.gatt().ok_or("device has no GATT server")?;
-        let server: web_sys::BluetoothRemoteGattServer = server.connect().await.map_err(js_err)?;
-
-        let wsvc: web_sys::BluetoothRemoteGattService =
-            server.get_primary_service_with_str(&uuid16(uuids.write_service)).await.map_err(js_err)?;
-        let write: BluetoothRemoteGattCharacteristic =
-            wsvc.get_characteristic_with_str(&uuid16(uuids.write_char)).await.map_err(js_err)?;
-        let nsvc: web_sys::BluetoothRemoteGattService =
-            server.get_primary_service_with_str(&uuid16(uuids.notify_service)).await.map_err(js_err)?;
-        let notify: BluetoothRemoteGattCharacteristic =
-            nsvc.get_characteristic_with_str(&uuid16(uuids.notify_char)).await.map_err(js_err)?;
+        // Android often fails the first GATT connection right after the chooser closes
+        // (status 133), and a connect can hang without ever settling, so retry with a timeout.
+        let mut last_err = String::new();
+        let mut chars = None;
+        for attempt in 1..=CONNECT_ATTEMPTS {
+            log(format!("Connecting (attempt {attempt}/{CONNECT_ATTEMPTS})"));
+            let timeout = TimeoutFuture::new(CONNECT_TIMEOUT_MS).map(|_| Err(format!("timed out after {} s", CONNECT_TIMEOUT_MS / 1000)));
+            let result = futures::select! {
+                r = open_gatt(&device, &uuids, &log).fuse() => r,
+                r = timeout.fuse() => r,
+            };
+            match result {
+                Ok(c) => {
+                    chars = Some(c);
+                    break;
+                }
+                Err(e) => {
+                    log(format!("Attempt {attempt} failed: {e}"));
+                    last_err = e;
+                    if let Some(s) = device.gatt() {
+                        s.disconnect();
+                    }
+                    if attempt < CONNECT_ATTEMPTS {
+                        TimeoutFuture::new(1000).await;
+                    }
+                }
+            }
+        }
+        let (write, notify) = chars.ok_or_else(|| format!("Could not connect to {name}: {last_err}"))?;
 
         let on_notify = Closure::<dyn FnMut(web_sys::Event)>::new(move |e: web_sys::Event| {
             let Some(c) = e.target().and_then(|t| t.dyn_into::<BluetoothRemoteGattCharacteristic>().ok()) else {
@@ -89,6 +149,7 @@ impl Machine {
             }
         });
         notify.set_oncharacteristicvaluechanged(Some(on_notify.as_ref().unchecked_ref()));
+        log("Starting notifications".into());
         let _: BluetoothRemoteGattCharacteristic = notify.start_notifications().await.map_err(js_err)?;
 
         let on_disconnect = Closure::<dyn FnMut(web_sys::Event)>::new(move |_| on_disconnect());

@@ -381,7 +381,7 @@ pub fn App() -> impl IntoView {
                 running.set(false);
                 ctx.push_log("Disconnected".into());
             };
-            match Machine::connect(on_notify, on_disconnect).await {
+            match Machine::connect(on_notify, on_disconnect, move |line| ctx.push_log(line)).await {
                 Ok(m) => {
                     let name = m.name.clone();
                     ctx.push_log(format!("Connected to {name}"));
@@ -404,7 +404,10 @@ pub fn App() -> impl IntoView {
                     ]);
                     ctx.run(steps);
                 }
-                Err(e) => ctx.error.set(Some(e)),
+                Err(e) => {
+                    ctx.push_log(format!("Connect failed: {e}"));
+                    ctx.error.set(Some(e));
+                }
             }
             connecting.set(false);
         });
