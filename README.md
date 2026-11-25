@@ -115,14 +115,32 @@ Same frames as tennis, except:
 - In the official app the padel screen only writes to machines named `PT2…`/`PT8…`;
   for `PT7…` machines it sends nothing. pusun-web sends anyway and shows a warning.
 
+## Verified on hardware
+
+Tested with a `PT8…` machine (date code 260830, so Vary Speed uses mode `08`) from Chrome
+on Android:
+
+- Connecting: the machine is found, GATT connects on `FFF0/FFF2` and `FFF0/FFF1`, and
+  notifications start.
+- Commands must be written **without response**. With response, Android never got a
+  confirmation, so the first write stayed pending and every later command waited behind it.
+  `src/ble.rs` uses write without response whenever the characteristic supports it and gives
+  up on any write after 3 s.
+- Starting a Vary Speed drill from the Drills library: the shot slots (`24`+n), sequence pages
+  (`6D`), mode (`6A 08`, trailer `6F`) and apply (`66`, trailer `67`) are accepted, so this
+  firmware does not reject those quirk frames for their non-checksum trailers.
+
 ## Not verified on hardware
 
-Everything here comes from reading the app's code, not from a captured session.
+The rest comes from reading the app's code, not from a captured session.
 Check these with a real machine:
 
 - Vary Speed grid depth: all 28 targets share one height; rows differ only in speed
   (98–122), so the UI assumes the fastest row lands deepest and draws it on top.
-- Whether the firmware checks the checksum on the quirk frames.
+- Where the library drills' balls land, at each difficulty level (lob and volley heights and
+  speeds are estimates).
+- Whether the quirk frames other than those above are accepted, and whether firmware before
+  date code 250101 (Vary Speed mode `06`) behaves the same.
 - Spin range: the app's slider limit was read as ±6 from constants, not from the layout.
 - Timing: start/stop sequences follow the app's delays, but some gaps are approximated.
 - Padel mode on any machine, and in particular on `PT7…` machines (see above).
