@@ -1088,6 +1088,7 @@ pub fn App() -> impl IntoView {
                                             {d.doubles.then(|| view! {
                                                 <span class="court-key"><i class="key-p2">"2"</i>{move || tr("Player 2, partner’s first ball")}</span>
                                             })}
+                                            <span class="court-key"><i class="key-ball">"1"</i>{move || tr(if d.doubles { "Where each ball lands, in order; ring colour shows the player" } else { "Where each ball lands, in order" })}</span>
                                         </span>
                                     </span>
                                     <span class=format!("level level-{}", d.level.label().0.to_lowercase())>{level}</span>

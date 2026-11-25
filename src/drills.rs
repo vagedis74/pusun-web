@@ -90,16 +90,153 @@ pub fn court_svg(d: &Drill) -> String {
         m.x - 0.7,
         -m.y - 0.5
     );
+    s += &ball_path(d);
+    let timing = Timing::of(d);
+    let who = receivers(d);
     for (i, p) in d.players.iter().enumerate() {
-        let fill = if i == 0 { "#2b6cb0" } else { "#b7791f" };
+        let fill = PLAYER_COLOURS[i.min(PLAYER_COLOURS.len() - 1)];
+        // Keyframes (time, spot): start, then for each of this player's balls run from
+        // where they last hit to where they hit this one, and back to the start at the end.
+        let mut keys = vec![(0.0, *p)];
+        let mut here = *p;
+        let mut free = 0.0f32;
+        for (j, b) in d.balls.iter().enumerate().filter(|(j, _)| who[*j] == i) {
+            let hit_at = timing.starts[j] + FLIGHT;
+            let depart = (free + 0.15).min(hit_at - 0.4).max(keys.last().unwrap().0 + 0.01);
+            let spot = hit_spot(b);
+            keys.push((depart, here));
+            keys.push((hit_at.max(depart + 0.01), spot));
+            here = spot;
+            free = hit_at;
+        }
+        let home = timing.total - LOOP_REST + 0.3;
+        let last_t = keys.last().unwrap().0;
+        keys.push((home.max(last_t + 0.01), here));
+        keys.push(((timing.total - 0.2).max(home + 0.01), *p));
+        keys.push((timing.total, *p));
+        let values: Vec<String> = keys.iter().map(|(_, q)| format!("{} {}", q.x, q.y)).collect();
+        let times: Vec<String> =
+            keys.iter().map(|(t, _)| format!("{:.4}", (t / timing.total).clamp(0.0, 1.0))).collect();
         s += &format!(
-            r##"<circle cx="{x}" cy="{y}" r=".6" fill="{fill}" stroke="#fff" stroke-width=".08"/><text x="{x}" y="{y}" font-size=".8" font-family="system-ui,sans-serif" font-weight="700" fill="#fff" text-anchor="middle" dominant-baseline="central">{n}</text>"##,
+            r##"<g transform="translate({x} {y})"><animateTransform attributeName="transform" type="translate" dur="{dur}s" repeatCount="indefinite" values="{values}" keyTimes="{times}"/><circle r=".6" fill="{fill}" stroke="#fff" stroke-width=".08"/><text font-size=".8" font-family="system-ui,sans-serif" font-weight="700" fill="#fff" text-anchor="middle" dominant-baseline="central">{n}</text></g>"##,
             x = p.x,
             y = p.y,
+            dur = timing.total,
+            values = values.join(";"),
+            times = times.join(";"),
             n = i + 1
         );
     }
     s + "</svg>"
+}
+
+/// Where a grid point (1..=28) lands, roughly: seven columns across the singles court,
+/// four rows from short to deep. Only for the drawing; the machine aims by its own values.
+fn landing(point: u8) -> Spot {
+    const DEPTHS: [f32; 4] = [3.0, 5.5, 8.0, 10.5];
+    let i = point.clamp(1, 28) - 1;
+    at((i % 7) as f32 * 1.2 - 3.6, DEPTHS[(i / 7) as usize])
+}
+
+/// Marker colours of player 1 and player 2.
+pub const PLAYER_COLOURS: [&str; 2] = ["#2b6cb0", "#b7791f"];
+
+/// Which player (index into `players`) each ball is for: in singles always the one player;
+/// in doubles the player starting on the side the ball lands, and a ball through the middle
+/// goes to whoever had the ball before (the first ball to player 1).
+fn receivers(d: &Drill) -> Vec<usize> {
+    let mut prev = 0;
+    d.balls
+        .iter()
+        .map(|b| {
+            let x = landing(b.point).x;
+            if d.players.len() > 1 && x.abs() > 0.1 {
+                prev = d
+                    .players
+                    .iter()
+                    .position(|p| p.x.signum() == x.signum())
+                    .unwrap_or(prev);
+            }
+            prev
+        })
+        .collect()
+}
+
+/// Seconds of animation per second of drill interval.
+const ANIMATION_PACE: f32 = 0.6;
+/// Flight time of the yellow ball from the machine to where it lands.
+const FLIGHT: f32 = 0.7;
+/// Rest at the end of each loop, so the order restarts visibly.
+const LOOP_REST: f32 = 1.5;
+
+/// Animated yellow balls flying from the machine to each landing spot in play order, each
+/// leaving a numbered mark, looping forever.
+struct Timing {
+    /// When the machine fires each ball, in seconds of animation.
+    starts: Vec<f32>,
+    /// Length of one loop.
+    total: f32,
+}
+
+impl Timing {
+    fn of(d: &Drill) -> Timing {
+        let gap = |b: &Ball| (b.interval as f32 / 10.0 * ANIMATION_PACE).max(FLIGHT + 0.3);
+        let starts: Vec<f32> = d
+            .balls
+            .iter()
+            .scan(0.0, |t, b| {
+                let start = *t;
+                *t += gap(b);
+                Some(start)
+            })
+            .collect();
+        let last = d.balls.last().map_or(0.0, gap);
+        let total = starts.last().copied().unwrap_or(0.0) + last + LOOP_REST;
+        Timing { starts, total }
+    }
+}
+
+/// Roughly where the player hits ball `b`: low, firm balls are volleyed near the net,
+/// high balls (lobs, floaters, shoulder-high balls) are taken out of the air in front of
+/// where they would land, and everything else is played after the bounce, behind it.
+fn hit_spot(b: &Ball) -> Spot {
+    let l = landing(b.point);
+    let height = b.height.unwrap_or(2000);
+    let y = if height <= 1600 && b.speed > 0 {
+        2.5
+    } else if height >= 2500 {
+        (l.y - 2.0).max(2.0)
+    } else {
+        (l.y + 2.5).min(12.5)
+    };
+    at(l.x, y)
+}
+
+fn ball_path(d: &Drill) -> String {
+    let Timing { starts, total } = Timing::of(d);
+    let k = |t: f32| format!("{:.4}", (t / total).clamp(0.0, 1.0));
+    let eps = 0.01;
+    let (mx, my) = (d.machine.x, -d.machine.y);
+    let mut s = String::new();
+    for (i, ((b, &start), &who)) in d.balls.iter().zip(&starts).zip(&receivers(d)).enumerate() {
+        let l = landing(b.point);
+        let ring = PLAYER_COLOURS[who.min(PLAYER_COLOURS.len() - 1)];
+        let land = start + FLIGHT;
+        let (a, b_, c, e) = (k(start), k(land), k(land + 0.35), k(land + eps));
+        s += &format!(
+            r##"<g opacity="0"><animate attributeName="opacity" dur="{total}s" repeatCount="indefinite" values="0;0;1;1" keyTimes="0;{b_};{e};1"/><circle cx="{x}" cy="{y}" r=".42" fill="#f4e04d" stroke="{ring}" stroke-width=".14"/><text x="{x}" y="{y}" font-size=".55" font-family="system-ui,sans-serif" font-weight="700" fill="#000" text-anchor="middle" dominant-baseline="central">{n}</text></g>"##,
+            x = l.x,
+            y = l.y,
+            n = i + 1
+        );
+        s += &format!(
+            r##"<circle r=".3" fill="#ffeb3b" stroke="#000" stroke-width=".05" opacity="0" cx="{mx}" cy="{my}"><animate attributeName="cx" dur="{total}s" repeatCount="indefinite" values="{mx};{mx};{x};{x}" keyTimes="0;{a};{b_};1"/><animate attributeName="cy" dur="{total}s" repeatCount="indefinite" values="{my};{my};{y};{y}" keyTimes="0;{a};{b_};1"/><animate attributeName="opacity" dur="{total}s" repeatCount="indefinite" values="0;0;1;1;0;0" keyTimes="0;{a};{a2};{b_};{c};1"/></circle>"##,
+            x = l.x,
+            y = l.y,
+            a2 = k(start + eps),
+        );
+    }
+    s
 }
 
 /// Difficulty 1..=5. Each drill is written at [`NORMAL`]; every step up feeds the
@@ -579,6 +716,24 @@ mod tests {
             assert_eq!(d.players.len(), if d.doubles { 2 } else { 1 }, "{}: players", d.key);
             for p in d.players.iter().chain([&d.machine]) {
                 assert!(p.x.abs() <= HALF_DOUBLES && (0.0..=14.0).contains(&p.y), "{}: {p:?}", d.key);
+            }
+        }
+    }
+
+    #[test]
+    fn animations_are_well_formed() {
+        for d in LIBRARY {
+            let svg = court_svg(d);
+            for part in svg.split("keyTimes=\"").skip(1) {
+                let times: Vec<f32> =
+                    part.split('"').next().unwrap().split(';').map(|t| t.parse().unwrap()).collect();
+                assert_eq!(times[0], 0.0, "{}", d.key);
+                assert_eq!(*times.last().unwrap(), 1.0, "{}", d.key);
+                assert!(times.windows(2).all(|w| w[0] <= w[1]), "{}: {times:?}", d.key);
+            }
+            for part in svg.split(" values=\"").skip(1).zip(svg.split("keyTimes=\"").skip(1)) {
+                let n = |s: &str| s.split('"').next().unwrap().split(';').count();
+                assert_eq!(n(part.0), n(part.1), "{}: values vs keyTimes", d.key);
             }
         }
     }

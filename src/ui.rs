@@ -99,6 +99,8 @@ pub fn tr(en: &str) -> &str {
         "Pusun 9001 Pro, centre, about 1 m behind the baseline" => "Pusun 9001 Pro, in het midden, ongeveer 1 m achter de baseline",
         "Player 1, first ball" => "Speler 1, eerste bal",
         "Player, first ball" => "Speler, eerste bal",
+        "Where each ball lands, in order; ring colour shows the player" => "Waar elke bal landt, op volgorde; de kleur van de rand toont de speler",
+        "Where each ball lands, in order" => "Waar elke bal landt, op volgorde",
         "Player 2, partner’s first ball" => "Speler 2, eerste bal van de partner",
         "Difficulty" => "Moeilijkheid",
         "every" => "elke",
