@@ -602,6 +602,16 @@ pub struct DrillPoint {
 }
 
 pub const DRILL_LR: (u16, u16) = (90, 2370);
+/// Left-right value of the grid's centre column (points 4, 11, 18, 25).
+pub const DRILL_LR_CENTRE: u16 = 1200;
+
+/// How far `lr` aims from the centre, in percent of the way to that side's limit:
+/// positive is left (100 at 2370), negative is right (−100 at 90).
+pub fn drill_lr_percent(lr: u16) -> i32 {
+    let (lr, c) = (lr as i32, DRILL_LR_CENTRE as i32);
+    let limit = if lr >= c { DRILL_LR.1 as i32 - c } else { c - DRILL_LR.0 as i32 };
+    ((lr - c) * 100 + limit / 2 * (lr - c).signum()) / limit
+}
 pub const DRILL_UD: (u16, u16) = (300, 4500);
 pub const DRILL_SPEED: (u8, u8) = (50, 140);
 pub const DRILL_INTERVAL: (u8, u8) = (25, 65);
@@ -782,6 +792,15 @@ pub fn hex(f: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn drill_lr_percent_from_centre() {
+        assert_eq!(drill_lr_percent(DRILL_LR_CENTRE), 0);
+        assert_eq!(drill_lr_percent(DRILL_LR.1), 100);
+        assert_eq!(drill_lr_percent(DRILL_LR.0), -100);
+        assert_eq!(drill_lr_percent(2130), 79); // grid column 1, far left
+        assert_eq!(drill_lr_percent(270), -84); // grid column 7, far right
+    }
 
     // Expected bytes are literal arrays from MainActivity7New.
     #[test]

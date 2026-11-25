@@ -1005,7 +1005,14 @@ pub fn App() -> impl IntoView {
                         view! {
                             <div class="shot">
                                 <strong>{move || format!("#{} · {} {id}", i + 1, tr("point"))}</strong>
-                                <Stepper label="Left ↔ right" value=((d.lr / 30) + 2).to_string() dec_label="◀" inc_label="▶"
+                                <Stepper label="Left ↔ right" value={
+                                    let pct = p::drill_lr_percent(d.lr);
+                                    match pct {
+                                        0 => "0%".to_string(),
+                                        n if n > 0 => format!("L {n}%"),
+                                        n => format!("R {}%", -n),
+                                    }
+                                } dec_label="◀" inc_label="▶"
                                     dec=move || edit_shot(i, &|p| p.lr = p.lr.saturating_add(30))
                                     inc=move || edit_shot(i, &|p| p.lr = p.lr.saturating_sub(30)) />
                                 <Stepper label="Height" value=(d.ud / 100).to_string()
