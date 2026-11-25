@@ -53,18 +53,30 @@ Web Bluetooth only works in **Chrome or Edge** (desktop or Android) on `https://
 - Vary Speed drills: up to 15 shots on a 7×4 target grid, each shot tunable (aim, height,
   speed, interval, spin; changes are sent live), optional pause before repeating
 - Saved routes (name, order, pause, shot settings) stored in the browser
-- Drills (tennis): a built-in library (`src/drills.rs`) of twelve singles drills, from a beginner
-  warm-up to pressure feeding, and ten doubles drills for a pair (warm-up, middle balls, crosscourt,
-  one up one back, poaching, both at the net, turbo doubles, storm the net, the Cannon of Steenwijk, lob and switch), each with a level and description;
-  Start plays one at once, Stop stops the machine, Edit opens it in Vary Speed to tune each ball
-  first; the playing drill's card is outlined. Hovering over (or tapping) a drill's name shows a court with
-  where to put the machine and where each player starts, and an animated yellow ball shows where
-  each ball lands, in order and for which player, while the players run to where they hit each one;
-  each hit shows the stroke (forehand, backhand, volley, swing volley, smash) and a dashed line to
-  where to play it.
-  A 1–5 difficulty
-  setting (remembered in the browser) applies to all drills: 3 plays them as written, and each step
-  up feeds the next ball 0.5 s sooner and 3 speed units faster
+- Drills (tennis): a built-in library (`src/drills.rs`), each drill with a level and description.
+  - Twelve singles drills: warm-up rally, deep consistency, corner to corner, run-around forehand,
+    approach and volley, first strike, Janny drill, lob and smash, heavy topspin defence, low slice
+    handling, figure of eight and pressure feed.
+  - Ten doubles drills for a pair: doubles warm-up, down the middle, crosscourt pair, one up one back,
+    poach and cover, both at the net, turbo doubles, storm the net, the Cannon of Steenwijk, and
+    lob and switch.
+  - Start plays a drill at once, Stop stops the machine, Edit opens it in Vary Speed to tune each
+    ball first. The playing drill's card is outlined.
+  - A 1–5 difficulty setting (remembered in the browser) applies to all drills: 3 plays them as
+    written, and each step up feeds the next ball 0.5 s sooner and 3 speed units faster.
+  - Setup popup: hovering over (or tapping) a drill's name shows the court from above with the
+    machine (centre, about 1 m behind the far baseline, which the drills' aim assumes) and where
+    each player starts. A looping animation then plays the drill: a yellow ball flies to where
+    each ball lands and leaves a numbered mark (ringed in the colour of the player it is for),
+    the players run to where they hit each ball, and each hit shows the stroke (forehand,
+    backhand, forehand/backhand volley, swing volley, smash) and a dashed line to where to play
+    it. The animation runs at about 0.6× the drill's real timing.
+  - The animation works out who takes each ball, the stroke and where it is hit from the balls'
+    height, speed and landing spot, assuming right-handers and crosscourt replies. A drill can
+    fix these per ball (`receivers`, `strokes`, `hit_depths`), as poach and cover, run-around
+    forehand, lob and switch and turbo doubles do.
+- Help: every **?** button opens a short explanation that closes by itself after a reading time
+  (4–12 s, shown by a shrinking bar), or at once on any tap
 - AI Coach: random drills from first-ball side, level and ball count (2–9)
 - Courses: Pusun's online training courses with their videos, with names, descriptions and
   video titles translated from Chinese (by pattern, in `src/courses.rs`); "Practice in Vary Speed"
@@ -146,7 +158,8 @@ Check these with a real machine:
 - Vary Speed grid depth: all 28 targets share one height; rows differ only in speed
   (98–122), so the UI assumes the fastest row lands deepest and draws it on top.
 - Where the library drills' balls land, at each difficulty level (lob and volley heights and
-  speeds are estimates).
+  speeds are estimates). The setup popup's landing spots and hitting positions are drawn from
+  the grid, not measured.
 - Whether the quirk frames other than those above are accepted, and whether firmware before
   date code 250101 (Vary Speed mode `06`) behaves the same.
 - Spin range: the app's slider limit was read as ±6 from constants, not from the layout.
