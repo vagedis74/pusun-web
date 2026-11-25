@@ -5,6 +5,9 @@ name: Deploy to GitHub Pages
 on:
   push:
     branches: [main]
+  # Weekly rebuild so the saved course list stays current.
+  schedule:
+    - cron: "17 4 * * 1"
   workflow_dispatch:
 
 permissions:
@@ -55,6 +58,19 @@ jobs:
 
       - name: Build
         run: trunk build --release --locked --public-url "/${{ github.event.repository.name }}/"
+
+      # Pages cannot proxy Pusun's course API (it sends no CORS headers), so save a
+      # copy next to the page; the Courses section falls back to it. A failed fetch
+      # only leaves Courses without data, it does not stop the deploy.
+      - name: Save course list
+        run: |
+          if curl -sSf --retry 3 --max-time 30 -o courses.json https://app.api.pusuntech.com/TutorialBallWay/get \
+             && jq -e 'type == "array" and length > 0' courses.json > /dev/null; then
+            mv courses.json dist/courses.json
+            echo "Saved $(jq length dist/courses.json) courses"
+          else
+            echo "::warning::Could not fetch the course list; Courses will show an error on the site"
+          fi
 
       - uses: actions/configure-pages@v6
 

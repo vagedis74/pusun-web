@@ -15,11 +15,13 @@ cargo test             # protocol byte-for-byte tests (host)
 ```
 
 The Courses section loads its list from Pusun's API, which sends no CORS headers. `trunk serve`
-proxies `/pusun-api/*` to it (see `Trunk.toml`); a static host needs the same proxy rule,
-otherwise the section explains why the list cannot load. Videos and images load directly.
+proxies `/pusun-api/*` to it (see `Trunk.toml`). Without a proxy, the page loads `courses.json`
+from next to itself instead (a saved copy of the API response, as the Pages workflow provides);
+with neither, the section explains why the list cannot load. Videos and images load directly.
 
 Live build: https://vagedis74.github.io/pusun-web/ (deployed by `.github/workflows/pages.yml` on every
-push to `main`; Courses cannot load there because GitHub Pages has no proxy).
+push to `main` and weekly; GitHub Pages has no proxy, so the workflow saves the course list as
+`courses.json` at build time and Courses falls back to it).
 
 Web Bluetooth only works in **Chrome or Edge** (desktop or Android) on `https://` or
 `http://localhost`. Safari and all iOS browsers do not support it. To use a phone, host

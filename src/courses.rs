@@ -4,7 +4,9 @@
 //! authentication. Each course has a name, description, image, a list of videos and
 //! `seles`, the drill points its Start button loads into Vary Speed. The API sends no
 //! CORS headers, so the page requests it through the `/pusun-api/` proxy configured
-//! in Trunk.toml. Images and videos are plain media URLs and load directly.
+//! in Trunk.toml. Static hosts have no proxy: there the page falls back to
+//! `courses.json` next to it, a copy of the API response the Pages workflow saves at
+//! build time. Images and videos are plain media URLs and load directly.
 
 #[cfg(target_arch = "wasm32")]
 use leptos::prelude::*;
@@ -14,6 +16,9 @@ use serde::Deserialize;
 
 #[cfg(target_arch = "wasm32")]
 const COURSES_URL: &str = "/pusun-api/get";
+/// Build-time copy, relative to the page so it works under a sub-path.
+#[cfg(target_arch = "wasm32")]
+const SNAPSHOT_URL: &str = "courses.json";
 /// `MyApplication.BASE_URL`, used for image paths that are not absolute URLs.
 const BASE_URL: &str = "https://www.pusuntech.com/";
 
@@ -123,24 +128,37 @@ impl Course {
 }
 
 #[cfg(target_arch = "wasm32")]
-async fn fetch_courses() -> Result<Vec<Course>, String> {
-    let resp = gloo_net::http::Request::get(COURSES_URL).send().await.map_err(|e| e.to_string())?;
+async fn fetch_json(url: &str) -> Result<Vec<Course>, String> {
+    let resp = gloo_net::http::Request::get(url).send().await.map_err(|e| e.to_string())?;
     let is_json = resp.headers().get("content-type").is_some_and(|t| t.contains("json"));
     if !resp.ok() || !is_json {
-        return Err(format!(
-            "The course list is not reachable here (HTTP {}). Pusun's server does not allow direct browser access, \
-             so this page needs the /pusun-api/ proxy that `trunk serve` provides.",
-            resp.status()
-        ));
+        return Err(format!("HTTP {}", resp.status()));
     }
-    resp.json::<Vec<Course>>().await.map_err(|e| format!("Unexpected course data: {e}"))
+    resp.json::<Vec<Course>>().await.map_err(|e| format!("unexpected course data: {e}"))
+}
+
+/// Live list through the proxy, else the build-time copy. The flag is true for the copy.
+#[cfg(target_arch = "wasm32")]
+async fn fetch_courses() -> Result<(Vec<Course>, bool), String> {
+    let live = match fetch_json(COURSES_URL).await {
+        Ok(list) => return Ok((list, false)),
+        Err(e) => e,
+    };
+    match fetch_json(SNAPSHOT_URL).await {
+        Ok(list) => Ok((list, true)),
+        Err(copy) => Err(format!(
+            "The course list is not reachable here (live: {live}; saved copy: {copy}). Pusun's server does not allow \
+             direct browser access, so this page needs the /pusun-api/ proxy that `trunk serve` provides, or a \
+             courses.json copy next to it."
+        )),
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
 /// Course browser. `on_practice` receives the course's drill points.
 #[component]
 pub fn Courses(on_practice: impl Fn(Vec<u8>) + Copy + Send + Sync + 'static) -> impl IntoView {
-    let courses = RwSignal::new(None::<Result<Vec<Course>, String>>);
+    let courses = RwSignal::new(None::<Result<(Vec<Course>, bool), String>>);
     let loading = RwSignal::new(false);
     let open = RwSignal::new(None::<Course>);
     let playing = RwSignal::new(String::new());
@@ -170,7 +188,8 @@ pub fn Courses(on_practice: impl Fn(Vec<u8>) + Copy + Send + Sync + 'static) -> 
                 Some(Err(e)) => view! {
                     <p class="error">{e} " " <button on:click=move |_| load()>"Retry"</button></p>
                 }.into_any(),
-                Some(Ok(list)) if open.get().is_none() => view! {
+                Some(Ok((list, copy))) if open.get().is_none() => view! {
+                    {copy.then(|| view! { <p class="hint">"Saved copy of the course list from when this site was built."</p> })}
                     <div class="courses">
                         {list.into_iter().map(|c| {
                             let pick = c.clone();

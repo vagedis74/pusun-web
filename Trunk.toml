@@ -1,6 +1,7 @@
 # Pusun's course API sends no CORS headers, so the browser cannot call it from this
 # origin. `trunk serve` forwards /pusun-api/* to it instead. Static hosting needs an
-# equivalent proxy rule, otherwise the Courses section shows an explanation.
+# equivalent proxy rule or a saved courses.json next to the page (the Pages workflow
+# writes one), otherwise the Courses section shows an explanation.
 [[proxy]]
 rewrite = "/pusun-api/"
 backend = "https://app.api.pusuntech.com/TutorialBallWay/"
