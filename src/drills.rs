@@ -309,6 +309,25 @@ pub const LIBRARY: &[Drill] = &[
         ],
     },
     Drill {
+        key: "turbo",
+        name: ("Turbo doubles", "Turbo dubbel"),
+        description: (
+            "Both players start on the baseline, one per half. The right player gets a deep forehand, sprints to the net for a low or normal volley in the middle, then backpedals for a smash. Then the left player gets the same three balls.",
+            "Beide spelers beginnen op de achterlijn, één per helft. De rechterspeler krijgt een diepe forehand, sprint naar het net voor een lage of normale volley in het midden en loopt dan achteruit terug voor een smash. Daarna krijgt de linkerspeler dezelfde drie ballen.",
+        ),
+        level: Level::Advanced,
+        doubles: true,
+        pause: DrillPause::Short,
+        balls: &[
+            shaped(27, 2000, 0, 50, 1),
+            shaped(18, 1500, 5, 40, 0),
+            shaped(20, 4000, -6, 45, 0),
+            shaped(24, 2000, 0, 50, 1),
+            shaped(18, 1500, 5, 40, 0),
+            shaped(16, 4000, -6, 45, 0),
+        ],
+    },
+    Drill {
         key: "lobswitch",
         name: ("Lob and switch", "Lob en wissel"),
         description: (
