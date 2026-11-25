@@ -379,6 +379,25 @@ pub const LIBRARY: &[Drill] = &[
         ],
     },
     Drill {
+        key: "kanon",
+        name: ("The Cannon of Steenwijk", "Het Kanon van Steenwijk"),
+        description: (
+            "Both players on the baseline, one per half. The left player first: a deep ball on the left, backhand crosscourt. Then a shorter ball: move in, take it about 1.5 m inside the baseline and attack with a forehand crosscourt from left to right. Then close in to 2–3 m from the net for a ball through the middle at shoulder height: hammer it out of the air into a corner or straight ahead. Then the right player gets the same three balls, mirrored on the right half.",
+            "Beide spelers op de achterlijn, één per helft. Eerst de linkerspeler: een diepe bal links, backhand cross. Dan een kortere bal: loop in, neem hem zo’n 1,5 meter voor de baseline en val aan met een forehand cross van links naar rechts. Loop daarna op tot 2 à 3 meter voor het net voor een bal door het midden op schouderhoogte: ram die in één keer uit de lucht naar een hoek of rechtdoor. Daarna krijgt de rechterspeler dezelfde drie ballen, gespiegeld op de rechterhelft.",
+        ),
+        level: Level::Advanced,
+        doubles: true,
+        pause: DrillPause::Long,
+        balls: &[
+            shaped(23, 2000, 0, 40, 1),
+            shaped(17, 2000, -4, 35, 0),
+            shaped(11, 2500, 0, 50, 0),
+            shaped(27, 2000, 0, 40, 1),
+            shaped(19, 2000, -4, 35, 0),
+            shaped(11, 2500, 0, 50, 0),
+        ],
+    },
+    Drill {
         key: "lobswitch",
         name: ("Lob and switch", "Lob en wissel"),
         description: (
