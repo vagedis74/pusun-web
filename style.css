@@ -72,7 +72,12 @@ button.help-button {
     border-radius: .75rem;
     padding: 1rem;
 }
-.help-dialog::backdrop { background: #0008; }
+.help-dialog { cursor: pointer; }
+.help-dialog p { margin: 0 0 .7rem; }
+.help-dialog::backdrop { background: #0006; }
+.help-timer { height: 3px; border-radius: 2px; background: #1656ad; transform-origin: left; animation: help-timer linear forwards; }
+@keyframes help-timer { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+@media (prefers-reduced-motion: reduce) { .help-timer { animation: none; opacity: .4; } }
 .court-row .with-help { min-width: 0; gap: 2px; }
 .court-row .target { flex: 1 1 auto; min-width: 0; }
 .courses .with-help { align-items: start; }

@@ -261,17 +261,34 @@ pub fn Help(topic: &'static str) -> impl IntoView {
         _ => unreachable!("Unknown help topic"),
     };
     let dialog = NodeRef::<leptos::html::Dialog>::new();
+    // Each opening gets a number, so a timer from an earlier opening cannot close it.
+    let opened = StoredValue::new(0u32);
+    let shown_ms = RwSignal::new(0u32);
+    let close = move || {
+        if let Some(dialog) = dialog.get_untracked() { dialog.close(); }
+    };
     view! {
         <button type="button" class="help-button"
             aria-label=move || format!("{} · {}", tr("Help"), tr(topic))
             on:click=move |_| {
-                if let Some(dialog) = dialog.get() { let _ = dialog.show_modal(); }
+                let Some(d) = dialog.get_untracked() else { return };
+                let text = if dutch() { nl } else { en };
+                // Long enough to read: a base plus time per character.
+                let ms = (2_500 + 55 * text.chars().count() as u32).clamp(4_000, 12_000);
+                shown_ms.set(ms);
+                let n = opened.get_value().wrapping_add(1);
+                opened.set_value(n);
+                let _ = d.show_modal();
+                leptos::task::spawn_local(async move {
+                    gloo_timers::future::TimeoutFuture::new(ms).await;
+                    if opened.get_value() == n { close(); }
+                });
             }>"?"</button>
-        <dialog node_ref=dialog class="help-dialog" aria-label=move || tr("Help")>
+        // Closes by itself; a tap anywhere closes it sooner.
+        <dialog node_ref=dialog class="help-dialog" aria-label=move || tr("Help")
+            on:click=move |_| close()>
             <p>{move || if dutch() { nl } else { en }}</p>
-            <form method="dialog">
-                <button autofocus>{move || tr("Close")}</button>
-            </form>
+            <div class="help-timer" style=move || format!("animation-duration: {}ms", shown_ms.get())></div>
         </dialog>
     }
 }
