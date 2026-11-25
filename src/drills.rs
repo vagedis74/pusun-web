@@ -253,6 +253,10 @@ fn shots(d: &Drill) -> Vec<Shot> {
                 Stroke::Smash | Stroke::SwingVolley => ((l.y - 2.0).max(2.0), -8.0),
                 _ => ((l.y + 2.5).min(12.5), -10.0),
             };
+            let y = match d.hit_depths.get(j) {
+                Some(&depth) if depth > 0.0 => depth,
+                _ => y,
+            };
             let hit = at(l.x, y);
             let start = d.players.get(who[j]).copied().unwrap_or(MACHINE);
             let backhand_below = if start.x < -1.0 { -1.8 } else if start.x > 1.0 { 1.8 } else { -0.6 };
@@ -379,6 +383,9 @@ pub struct Drill {
     /// The stroke for each ball; empty to work it out from each ball's height and speed
     /// and where it lands (see [`shots`]).
     strokes: &'static [Stroke],
+    /// How far from the net each ball is hit, in metres; empty, or 0.0 for a ball, to work
+    /// it out from the stroke (see [`shots`]).
+    hit_depths: &'static [f32],
 }
 
 impl Drill {
@@ -429,6 +436,7 @@ pub const LIBRARY: &[Drill] = &[
         players: &[at(0.0, 12.5)],
         receivers: &[],
         strokes: &[],
+        hit_depths: &[],
         balls: &[ball(17, 50), ball(19, 50)],
     },
     Drill {
@@ -445,6 +453,7 @@ pub const LIBRARY: &[Drill] = &[
         players: &[at(0.0, 12.5)],
         receivers: &[],
         strokes: &[],
+        hit_depths: &[],
         balls: &[shaped(23, 2000, 0, 40, 2), shaped(27, 2000, 0, 40, 2)],
     },
     Drill {
@@ -461,6 +470,7 @@ pub const LIBRARY: &[Drill] = &[
         players: &[at(0.0, 12.5)],
         receivers: &[],
         strokes: &[],
+        hit_depths: &[],
         balls: &[shaped(22, 2000, 0, 35, 1), shaped(28, 2000, 0, 35, 1)],
     },
     Drill {
@@ -477,6 +487,7 @@ pub const LIBRARY: &[Drill] = &[
         players: &[at(0.0, 12.5)],
         receivers: &[],
         strokes: &[Stroke::Forehand, Stroke::Forehand, Stroke::Forehand],
+        hit_depths: &[],
         balls: &[ball(24, 45), ball(24, 45), ball(28, 45)],
     },
     Drill {
@@ -493,6 +504,7 @@ pub const LIBRARY: &[Drill] = &[
         players: &[at(0.0, 12.5)],
         receivers: &[],
         strokes: &[],
+        hit_depths: &[],
         balls: &[shaped(4, 2000, 0, 50, -3), shaped(16, 1500, 10, 30, 0), shaped(20, 1500, 10, 30, 0)],
     },
     Drill {
@@ -509,6 +521,7 @@ pub const LIBRARY: &[Drill] = &[
         players: &[at(0.0, 12.5)],
         receivers: &[],
         strokes: &[],
+        hit_depths: &[],
         balls: &[
             shaped(25, 2000, 0, 40, 1),
             shaped(13, 2000, -4, 35, 0),
@@ -530,6 +543,7 @@ pub const LIBRARY: &[Drill] = &[
         players: &[at(0.0, 6.4)],
         receivers: &[],
         strokes: &[],
+        hit_depths: &[],
         balls: &[
             shaped(2, 1500, -20, 30, -3),
             shaped(9, 1500, 5, 35, 0),
@@ -551,6 +565,7 @@ pub const LIBRARY: &[Drill] = &[
         players: &[at(0.0, 3.0)],
         receivers: &[],
         strokes: &[],
+        hit_depths: &[],
         balls: &[shaped(10, 4000, -6, 60, 0), shaped(12, 4000, -6, 60, 0)],
     },
     Drill {
@@ -567,6 +582,7 @@ pub const LIBRARY: &[Drill] = &[
         players: &[at(0.0, 13.0)],
         receivers: &[],
         strokes: &[],
+        hit_depths: &[],
         balls: &[shaped(22, 2600, 0, 45, 5), shaped(25, 2600, 0, 45, 5), shaped(28, 2600, 0, 45, 5)],
     },
     Drill {
@@ -583,6 +599,7 @@ pub const LIBRARY: &[Drill] = &[
         players: &[at(0.0, 12.5)],
         receivers: &[],
         strokes: &[],
+        hit_depths: &[],
         balls: &[shaped(9, 1600, 0, 45, -4), shaped(13, 1600, 0, 45, -4)],
     },
     Drill {
@@ -599,6 +616,7 @@ pub const LIBRARY: &[Drill] = &[
         players: &[at(0.0, 12.5)],
         receivers: &[],
         strokes: &[],
+        hit_depths: &[],
         balls: &[ball(22, 40), ball(4, 40), ball(28, 40), ball(4, 40)],
     },
     Drill {
@@ -615,6 +633,7 @@ pub const LIBRARY: &[Drill] = &[
         players: &[at(0.0, 12.5)],
         receivers: &[],
         strokes: &[],
+        hit_depths: &[],
         balls: &[
             shaped(22, 2000, 5, 30, 1),
             shaped(26, 2000, 5, 30, 1),
@@ -639,6 +658,7 @@ pub const LIBRARY: &[Drill] = &[
         players: &[at(-2.7, 12.5), at(2.7, 12.5)],
         receivers: &[],
         strokes: &[],
+        hit_depths: &[],
         balls: &[shaped(16, 2000, -6, 50, 0), shaped(20, 2000, -6, 50, 0)],
     },
     Drill {
@@ -655,6 +675,7 @@ pub const LIBRARY: &[Drill] = &[
         players: &[at(-2.7, 12.5), at(2.7, 12.5)],
         receivers: &[],
         strokes: &[],
+        hit_depths: &[],
         balls: &[ball(25, 50), ball(18, 50)],
     },
     Drill {
@@ -671,6 +692,7 @@ pub const LIBRARY: &[Drill] = &[
         players: &[at(2.7, 12.5), at(-2.7, 12.5)],
         receivers: &[],
         strokes: &[],
+        hit_depths: &[],
         balls: &[shaped(27, 2000, 0, 40, 1), shaped(23, 2000, 0, 40, 1)],
     },
     Drill {
@@ -687,6 +709,7 @@ pub const LIBRARY: &[Drill] = &[
         players: &[at(2.7, 12.5), at(-2.7, 3.0)],
         receivers: &[],
         strokes: &[],
+        hit_depths: &[],
         balls: &[shaped(27, 2000, 0, 35, 1), shaped(16, 1500, 10, 40, 0)],
     },
     Drill {
@@ -703,6 +726,7 @@ pub const LIBRARY: &[Drill] = &[
         players: &[at(-2.7, 3.0), at(2.7, 12.5)],
         receivers: &[0, 1],
         strokes: &[],
+        hit_depths: &[],
         balls: &[shaped(18, 1500, 10, 40, 0), shaped(22, 2000, 0, 45, 1)],
     },
     Drill {
@@ -719,6 +743,7 @@ pub const LIBRARY: &[Drill] = &[
         players: &[at(-2.7, 3.0), at(2.7, 3.0)],
         receivers: &[],
         strokes: &[],
+        hit_depths: &[],
         balls: &[
             shaped(16, 1500, 10, 25, 0),
             shaped(18, 1500, 10, 25, 0),
@@ -730,8 +755,8 @@ pub const LIBRARY: &[Drill] = &[
         key: "turbo",
         name: ("Turbo doubles", "Turbo dubbel"),
         description: (
-            "Both players start on the baseline, one per half. The right player gets a deep forehand, sprints to the net for a low or normal volley in the middle, then backpedals for a smash. Then the left player gets the same three balls.",
-            "Beide spelers beginnen op de achterlijn, één per helft. De rechterspeler krijgt een diepe forehand, sprint naar het net voor een lage of normale volley in het midden en loopt dan achteruit terug voor een smash. Daarna krijgt de linkerspeler dezelfde drie ballen.",
+            "Both players start on the baseline, one per half. The right player gets a deep forehand, sprints in to volley a low or normal ball on the right about 1 m from the net, then backpedals to 2–3 m from the net for a smash. Then the left player gets the same three balls on the left.",
+            "Beide spelers beginnen op de achterlijn, één per helft. De rechterspeler krijgt een diepe forehand, sprint naar voren voor een lage of normale volley rechts, ongeveer een meter achter het net, en loopt dan achteruit terug tot 2 à 3 meter achter het net voor een smash. Daarna krijgt de linkerspeler dezelfde drie ballen links.",
         ),
         level: Level::Advanced,
         doubles: true,
@@ -740,13 +765,14 @@ pub const LIBRARY: &[Drill] = &[
         players: &[at(2.7, 12.5), at(-2.7, 12.5)],
         receivers: &[],
         strokes: &[],
+        hit_depths: &[0.0, 1.0, 2.5, 0.0, 1.0, 2.5],
         balls: &[
             shaped(27, 2000, 0, 50, 1),
-            shaped(18, 1500, 5, 40, 0),
-            shaped(20, 4000, -6, 45, 0),
+            shaped(6, 1500, 5, 40, 0),
+            shaped(13, 4000, -6, 45, 0),
             shaped(24, 2000, 0, 50, 1),
-            shaped(18, 1500, 5, 40, 0),
-            shaped(16, 4000, -6, 45, 0),
+            shaped(2, 1500, 5, 40, 0),
+            shaped(9, 4000, -6, 45, 0),
         ],
     },
     Drill {
@@ -763,6 +789,7 @@ pub const LIBRARY: &[Drill] = &[
         players: &[at(-2.7, 12.5), at(2.7, 12.5)],
         receivers: &[],
         strokes: &[],
+        hit_depths: &[],
         balls: &[
             shaped(11, 2000, -6, 35, -2),
             shaped(20, 1500, 5, 30, 0),
@@ -784,6 +811,7 @@ pub const LIBRARY: &[Drill] = &[
         players: &[at(-2.7, 12.5), at(2.7, 12.5)],
         receivers: &[],
         strokes: &[],
+        hit_depths: &[],
         balls: &[
             shaped(23, 2000, 0, 40, 1),
             shaped(17, 2000, -4, 35, 0),
@@ -807,6 +835,7 @@ pub const LIBRARY: &[Drill] = &[
         players: &[at(-2.7, 3.0), at(2.7, 3.0)],
         receivers: &[1, 0],
         strokes: &[Stroke::Groundstroke, Stroke::Groundstroke],
+        hit_depths: &[],
         balls: &[shaped(23, 3800, -10, 60, 0), shaped(27, 3800, -10, 60, 0)],
     },
 ];
@@ -873,6 +902,7 @@ mod tests {
             assert!(d.receivers.is_empty() || d.receivers.len() == d.balls.len(), "{}: receivers", d.key);
             assert!(d.receivers.iter().all(|&r| r < d.players.len()), "{}: receivers", d.key);
             assert!(d.strokes.is_empty() || d.strokes.len() == d.balls.len(), "{}: strokes", d.key);
+            assert!(d.hit_depths.is_empty() || d.hit_depths.len() == d.balls.len(), "{}: hit depths", d.key);
             for p in d.players.iter().chain([&d.machine]) {
                 assert!(p.x.abs() <= HALF_DOUBLES && (0.0..=14.0).contains(&p.y), "{}: {p:?}", d.key);
             }
