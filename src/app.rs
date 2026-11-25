@@ -1032,32 +1032,35 @@ pub fn App() -> impl IntoView {
 
         <section id="drills" style:display=move || if padel() { "none" } else { "" }>
             <h2>{move || tr("Drills")}</h2>
-            <p class="hint">{move || tr("Ready-made tennis drills. Start plays one straight away; Edit opens it in Vary Speed so you can tune each ball first.")}</p>
-            <div class="drills">
-                {LIBRARY.iter().map(|d| {
-                    let name = move || if ui::dutch() { d.name.1 } else { d.name.0 };
-                    let level = move || { let (en, nl) = d.level.label(); if ui::dutch() { nl } else { en } };
-                    let balls = d.points().len();
-                    view! {
-                        <article class="drill" id=format!("drill-{}", d.key)>
-                            <div class="drill-head">
-                                <strong>{name}</strong>
-                                <span class=format!("level level-{}", d.level.label().0.to_lowercase())>{level}</span>
-                            </div>
-                            <p>{move || if ui::dutch() { d.description.1 } else { d.description.0 }}</p>
-                            <small class="hint">{move || format!("{balls} {}", if balls == 1 { tr("ball") } else { tr("balls") })}</small>
-                            <div class="row">
-                                <span class="with-help"><button class="primary" disabled=move || !connected()
-                                    on:click=move |_| { load_library_drill(d); start_current_drill(); }>{move || tr("Start")}</button><Help topic="Drill start" /></span>
-                                <span class="with-help"><button on:click=move |_| {
-                                    load_library_drill(d);
-                                    if let Some(el) = document().get_element_by_id("vary-speed") { el.scroll_into_view(); }
-                                }>{move || tr("Edit")}</button><Help topic="Drill edit" /></span>
-                            </div>
-                        </article>
-                    }
-                }).collect_view()}
-            </div>
+            <p class="hint">{move || tr("Ready-made tennis drills for one player or a doubles pair. Start plays one straight away; Edit opens it in Vary Speed so you can tune each ball first.")}</p>
+            {[(false, "Singles"), (true, "Doubles")].into_iter().map(|(doubles, heading)| view! {
+                <h3>{move || tr(heading)}</h3>
+                <div class="drills">
+                    {LIBRARY.iter().filter(move |d| d.doubles == doubles).map(|d| {
+                        let name = move || if ui::dutch() { d.name.1 } else { d.name.0 };
+                        let level = move || { let (en, nl) = d.level.label(); if ui::dutch() { nl } else { en } };
+                        let balls = d.points().len();
+                        view! {
+                            <article class="drill" id=format!("drill-{}", d.key)>
+                                <div class="drill-head">
+                                    <strong>{name}</strong>
+                                    <span class=format!("level level-{}", d.level.label().0.to_lowercase())>{level}</span>
+                                </div>
+                                <p>{move || if ui::dutch() { d.description.1 } else { d.description.0 }}</p>
+                                <small class="hint">{move || format!("{balls} {}", if balls == 1 { tr("ball") } else { tr("balls") })}</small>
+                                <div class="row">
+                                    <span class="with-help"><button class="primary" disabled=move || !connected()
+                                        on:click=move |_| { load_library_drill(d); start_current_drill(); }>{move || tr("Start")}</button><Help topic="Drill start" /></span>
+                                    <span class="with-help"><button on:click=move |_| {
+                                        load_library_drill(d);
+                                        if let Some(el) = document().get_element_by_id("vary-speed") { el.scroll_into_view(); }
+                                    }>{move || tr("Edit")}</button><Help topic="Drill edit" /></span>
+                                </div>
+                            </article>
+                        }
+                    }).collect_view()}
+                </div>
+            }).collect_view()}
         </section>
 
         <div style:display=move || if padel() { "none" } else { "" }>

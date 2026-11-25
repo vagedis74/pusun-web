@@ -48,6 +48,8 @@ pub struct Drill {
     pub name: (&'static str, &'static str),
     pub description: (&'static str, &'static str),
     pub level: Level,
+    /// Written for two players on one side of the net.
+    pub doubles: bool,
     pub pause: DrillPause,
     balls: &'static [Ball],
 }
@@ -87,6 +89,7 @@ pub const LIBRARY: &[Drill] = &[
             "Rustige ballen net links en rechts van het midden, 5 s na elkaar. Vind je ritme aan beide kanten voordat het sneller gaat.",
         ),
         level: Level::Beginner,
+        doubles: false,
         pause: DrillPause::None,
         balls: &[ball(17, 50), ball(19, 50)],
     },
@@ -98,6 +101,7 @@ pub const LIBRARY: &[Drill] = &[
             "Diepe ballen met lichte topspin naar beide helften van de achterlijn. Speel elke bal diep cross terug.",
         ),
         level: Level::Intermediate,
+        doubles: false,
         pause: DrillPause::None,
         balls: &[shaped(23, 2000, 0, 40, 2), shaped(27, 2000, 0, 40, 2)],
     },
@@ -109,6 +113,7 @@ pub const LIBRARY: &[Drill] = &[
             "Diepe ballen naar beide hoeken, 3,5 s na elkaar. Herstel na elke slag naar het midden.",
         ),
         level: Level::Advanced,
+        doubles: false,
         pause: DrillPause::Short,
         balls: &[shaped(22, 2000, 0, 35, 1), shaped(28, 2000, 0, 35, 1)],
     },
@@ -120,6 +125,7 @@ pub const LIBRARY: &[Drill] = &[
             "Twee ballen links van het midden, dan één wijd rechts. Rechtshandigen: loop om de backhand heen voor inside-out forehands en haal dan de wijde forehand.",
         ),
         level: Level::Intermediate,
+        doubles: false,
         pause: DrillPause::Short,
         balls: &[ball(24, 45), ball(24, 45), ball(28, 45)],
     },
@@ -131,6 +137,7 @@ pub const LIBRARY: &[Drill] = &[
             "Een korte slice om op aan te vallen, dan twee stevige, lage ballen om links en rechts te volleren. Een lange pauze geeft tijd om terug te gaan naar de achterlijn.",
         ),
         level: Level::Intermediate,
+        doubles: false,
         pause: DrillPause::Long,
         balls: &[shaped(4, 2000, 0, 50, -3), shaped(16, 1500, 10, 30, 0), shaped(20, 1500, 10, 30, 0)],
     },
@@ -142,6 +149,7 @@ pub const LIBRARY: &[Drill] = &[
             "Hoge, langzame lobs links en rechts van het midden, 6 s na elkaar. Sta dicht bij het net, draai zijwaarts en smash.",
         ),
         level: Level::Intermediate,
+        doubles: false,
         pause: DrillPause::Short,
         balls: &[shaped(10, 4000, -6, 60, 0), shaped(12, 4000, -6, 60, 0)],
     },
@@ -153,6 +161,7 @@ pub const LIBRARY: &[Drill] = &[
             "Hoge, diepe ballen met veel topspin naar links, midden en rechts. Blijf staan en neem de bal voordat hij te hoog opspringt.",
         ),
         level: Level::Advanced,
+        doubles: false,
         pause: DrillPause::Short,
         balls: &[shaped(22, 2600, 0, 45, 5), shaped(25, 2600, 0, 45, 5), shaped(28, 2600, 0, 45, 5)],
     },
@@ -164,6 +173,7 @@ pub const LIBRARY: &[Drill] = &[
             "Lage, doorschietende ballen met backspin naar het midden van de baan, links en rechts. Buig door je knieën en til de bal over het net.",
         ),
         level: Level::Intermediate,
+        doubles: false,
         pause: DrillPause::None,
         balls: &[shaped(9, 1600, 0, 45, -4), shaped(13, 1600, 0, 45, -4)],
     },
@@ -175,6 +185,7 @@ pub const LIBRARY: &[Drill] = &[
             "Diep links, kort midden, diep rechts, kort midden. Train naar voren en naar achteren, en van links naar rechts.",
         ),
         level: Level::Advanced,
+        doubles: false,
         pause: DrillPause::Short,
         balls: &[ball(22, 40), ball(4, 40), ball(28, 40), ball(4, 40)],
     },
@@ -186,6 +197,7 @@ pub const LIBRARY: &[Drill] = &[
             "Zes snellere ballen over de hele baan, 3 s na elkaar, dan een lange pauze. Speel elke bal diep terug, hoe je er ook komt.",
         ),
         level: Level::Advanced,
+        doubles: false,
         pause: DrillPause::Long,
         balls: &[
             shaped(22, 2000, 5, 30, 1),
@@ -195,6 +207,84 @@ pub const LIBRARY: &[Drill] = &[
             shaped(24, 2000, 5, 30, 1),
             shaped(20, 2000, 5, 30, 1),
         ],
+    },
+    // Doubles: two players on the receiving side. Left and right are the halves of the court.
+    Drill {
+        key: "middle",
+        name: ("Down the middle", "Door het midden"),
+        description: (
+            "Both players on the baseline. Calm balls through the middle, 5 s apart. Call who takes each one; usually the player with the forehand in the middle.",
+            "Beide spelers op de achterlijn. Rustige ballen door het midden, 5 s na elkaar. Roep wie hem neemt; meestal de speler met de forehand in het midden.",
+        ),
+        level: Level::Beginner,
+        doubles: true,
+        pause: DrillPause::None,
+        balls: &[ball(25, 50), ball(18, 50)],
+    },
+    Drill {
+        key: "crosscourt",
+        name: ("Crosscourt pair", "Cross met z’n tweeën"),
+        description: (
+            "Both players on the baseline, one per half. Deep balls alternate right and left; each player drives their ball back crosscourt, as on a return of serve.",
+            "Beide spelers op de achterlijn, één per helft. Diepe ballen wisselen rechts en links; elke speler slaat zijn bal cross terug, zoals bij een return.",
+        ),
+        level: Level::Intermediate,
+        doubles: true,
+        pause: DrillPause::None,
+        balls: &[shaped(27, 2000, 0, 40, 1), shaped(23, 2000, 0, 40, 1)],
+    },
+    Drill {
+        key: "oneupback",
+        name: ("One up, one back", "Eén voor, één achter"),
+        description: (
+            "Baseline player on the right, net player on the left. A deep ball for the baseline player, then a firm, low ball for the net player to volley. Swap sides after each set.",
+            "Achterspeler rechts, netspeler links. Een diepe bal voor de achterspeler, dan een stevige, lage bal voor de netspeler om te volleren. Wissel na elke serie van kant.",
+        ),
+        level: Level::Intermediate,
+        doubles: true,
+        pause: DrillPause::None,
+        balls: &[shaped(27, 2000, 0, 35, 1), shaped(16, 1500, 10, 40, 0)],
+    },
+    Drill {
+        key: "poach",
+        name: ("Poach and cover", "Onderscheppen en dekken"),
+        description: (
+            "Net player starts on the left and crosses to poach a firm ball through the middle. The partner switches behind them and covers the deep ball to the left that follows.",
+            "De netspeler begint links en steekt over om een stevige bal door het midden te onderscheppen. De partner wisselt erachter langs en dekt de diepe bal naar links die volgt.",
+        ),
+        level: Level::Advanced,
+        doubles: true,
+        pause: DrillPause::Short,
+        balls: &[shaped(18, 1500, 10, 40, 0), shaped(22, 2000, 0, 45, 1)],
+    },
+    Drill {
+        key: "netpair",
+        name: ("Both at the net", "Samen aan het net"),
+        description: (
+            "Both players at the net. Fast, low balls left, middle, right, middle, 2.5 s apart. Keep the volleys low and agree who takes the middle ball.",
+            "Beide spelers aan het net. Snelle, lage ballen links, midden, rechts, midden, 2,5 s na elkaar. Houd de volleys laag en spreek af wie de middelste bal neemt.",
+        ),
+        level: Level::Advanced,
+        doubles: true,
+        pause: DrillPause::Short,
+        balls: &[
+            shaped(16, 1500, 10, 25, 0),
+            shaped(18, 1500, 10, 25, 0),
+            shaped(20, 1500, 10, 25, 0),
+            shaped(18, 1500, 10, 25, 0),
+        ],
+    },
+    Drill {
+        key: "lobswitch",
+        name: ("Lob and switch", "Lob en wissel"),
+        description: (
+            "Both players at the net. High lobs over the left and right player, 6 s apart. The partner crosses behind to chase the lob while the lobbed player switches sides.",
+            "Beide spelers aan het net. Hoge lobs over de linker- en rechterspeler, 6 s na elkaar. De partner loopt erachter langs om de lob te halen en de gelobde speler wisselt van kant.",
+        ),
+        level: Level::Intermediate,
+        doubles: true,
+        pause: DrillPause::Short,
+        balls: &[shaped(23, 3800, -10, 60, 0), shaped(27, 3800, -10, 60, 0)],
     },
 ];
 
@@ -229,6 +319,11 @@ mod tests {
                 assert!(params.iter().all(|(j, q)| j != id || q == p), "{}: point {id} differs", d.key);
             }
         }
+    }
+
+    #[test]
+    fn has_singles_and_doubles() {
+        assert!(LIBRARY.iter().any(|d| d.doubles) && LIBRARY.iter().any(|d| !d.doubles));
     }
 
     #[test]
