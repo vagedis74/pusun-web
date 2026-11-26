@@ -416,6 +416,145 @@ pub fn decode_saved(name: &str, fields: &str) -> Option<Saved> {
     Some(Saved { name: name.to_string(), text, mode, doubles })
 }
 
+/// Marks an exported file as ours, so importing some other JSON file fails clearly.
+const FILE_FORMAT: &str = "pusun-web drills";
+const FILE_VERSION: u32 = 1;
+/// Largest file import reads, in bytes, and most drills it takes from one file.
+pub const MAX_IMPORT_BYTES: usize = 1_000_000;
+pub const MAX_IMPORT_DRILLS: usize = 500;
+/// Longest drill text and name kept from a file, in characters.
+pub const MAX_TEXT: usize = 2000;
+const MAX_NAME: usize = 80;
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct DrillFile {
+    format: String,
+    version: u32,
+    drills: Vec<FileDrill>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct FileDrill {
+    name: String,
+    /// "singles" or "doubles".
+    players: String,
+    /// "offensive", "defensive" or absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    style: Option<String>,
+    text: String,
+}
+
+/// Saved drills as a JSON file for download.
+pub fn export_file(drills: &[Saved]) -> String {
+    let file = DrillFile {
+        format: FILE_FORMAT.into(),
+        version: FILE_VERSION,
+        drills: drills
+            .iter()
+            .map(|d| FileDrill {
+                name: d.name.clone(),
+                players: if d.doubles { "doubles" } else { "singles" }.into(),
+                style: d.mode.map(|m| if m == Mode::Offensive { "offensive" } else { "defensive" }.into()),
+                text: d.text.clone(),
+            })
+            .collect(),
+    };
+    serde_json::to_string_pretty(&file).unwrap_or_default()
+}
+
+/// What an import did, for the message under the list.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ImportReport {
+    pub added: usize,
+    /// Added under a new name because a different drill already had theirs.
+    pub renamed: usize,
+    /// Already saved with the same name and content.
+    pub unchanged: usize,
+    /// Damaged entries left out.
+    pub skipped: usize,
+}
+
+/// Keeps a name usable as a stored field: no tabs or line breaks, trimmed and capped.
+fn clean_name(name: &str) -> String {
+    let name: String = name.chars().map(|c| if c.is_control() { ' ' } else { c }).take(MAX_NAME).collect();
+    name.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Keeps text plain, as the text box does: line breaks and tabs, no other control characters.
+pub fn clean_text(text: &str) -> String {
+    text.chars().filter(|c| !c.is_control() || *c == '\n' || *c == '\t').take(MAX_TEXT).collect()
+}
+
+/// Reads an exported file and merges it into `existing`. A drill whose name is taken by a
+/// different drill is added as "Name (2)", "Name (3)", …; an identical one is left alone.
+/// The file is untrusted: entries are checked and cleaned, and damaged ones skipped.
+pub fn import_file(json: &str, existing: &[Saved]) -> Result<(Vec<Saved>, ImportReport), Problem> {
+    let unreadable = || problem(0, "This is not a drill file exported from this app.", "Dit is geen oefeningenbestand dat met deze app is geëxporteerd.");
+    if json.len() > MAX_IMPORT_BYTES {
+        return Err(problem(0, "The file is too large to be a drill file (over 1 MB).", "Het bestand is te groot voor een oefeningenbestand (meer dan 1 MB)."));
+    }
+    let file: DrillFile = serde_json::from_str(json).map_err(|_| unreadable())?;
+    if file.format != FILE_FORMAT {
+        return Err(unreadable());
+    }
+    if file.version > FILE_VERSION {
+        return Err(problem(0, "This drill file comes from a newer version of the app. Reload the page and try again.",
+            "Dit oefeningenbestand komt van een nieuwere versie van de app. Laad de pagina opnieuw en probeer het nog eens."));
+    }
+    let mut all = existing.to_vec();
+    let mut report = ImportReport::default();
+    for (i, d) in file.drills.into_iter().enumerate() {
+        if i >= MAX_IMPORT_DRILLS {
+            report.skipped += 1;
+            continue;
+        }
+        let doubles = match d.players.as_str() {
+            "doubles" => true,
+            "singles" => false,
+            _ => { report.skipped += 1; continue; }
+        };
+        let mode = match d.style.as_deref() {
+            None | Some("") => None,
+            Some("offensive") => Some(Mode::Offensive),
+            Some("defensive") => Some(Mode::Defensive),
+            Some(_) => { report.skipped += 1; continue; }
+        };
+        let name = clean_name(&d.name);
+        if name.is_empty() {
+            report.skipped += 1;
+            continue;
+        }
+        let drill = Saved { name: name.clone(), text: clean_text(&d.text.replace('\r', "")), mode, doubles };
+        let same_content = |x: &Saved| x.text == drill.text && x.mode == drill.mode && x.doubles == drill.doubles;
+        match all.iter().find(|x| x.name == name) {
+            Some(x) if same_content(x) => report.unchanged += 1,
+            Some(_) => {
+                let mut n = 2;
+                let new_name = loop {
+                    let candidate = format!("{name} ({n})");
+                    match all.iter().find(|x| x.name == candidate) {
+                        None => break Some(candidate),
+                        Some(x) if same_content(x) => break None,
+                        Some(_) => n += 1,
+                    }
+                };
+                match new_name {
+                    Some(new_name) => {
+                        all.push(Saved { name: new_name, ..drill });
+                        report.renamed += 1;
+                    }
+                    None => report.unchanged += 1,
+                }
+            }
+            None => {
+                all.push(drill);
+                report.added += 1;
+            }
+        }
+    }
+    Ok((all, report))
+}
+
 /// One ball of a generated drill, for the list under the court.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Planned {
@@ -601,6 +740,59 @@ mod tests {
     }
 
     #[test]
+    fn export_then_import_round_trips() {
+        let drills = vec![
+            Saved { name: "Net attack".into(), text: "1. volley short left\n2. lob deep".into(), mode: Some(Mode::Defensive), doubles: true },
+            Saved { name: "Rally".into(), text: "1. topspin deep\t\"quoted\" \\ ok".into(), mode: None, doubles: false },
+        ];
+        let file = export_file(&drills);
+        assert!(file.contains("\"format\": \"pusun-web drills\""));
+        let (all, report) = import_file(&file, &[]).unwrap();
+        assert_eq!(all, drills);
+        assert_eq!(report, ImportReport { added: 2, ..Default::default() });
+        // Importing again changes nothing.
+        let (again, report) = import_file(&file, &all).unwrap();
+        assert_eq!(again, drills);
+        assert_eq!(report, ImportReport { unchanged: 2, ..Default::default() });
+    }
+
+    #[test]
+    fn import_renames_clashes_and_cleans_untrusted_entries() {
+        let mine = vec![Saved { name: "Rally".into(), text: "1. flat deep".into(), mode: None, doubles: false }];
+        let json = r#"{"format":"pusun-web drills","version":1,"drills":[
+            {"name":"Rally","players":"singles","text":"1. lob deep"},
+            {"name":"Rally","players":"singles","text":"1. slice deep"},
+            {"name":"  Tab\there\nand\u0007bell  ","players":"doubles","style":"offensive","text":"1. lob\r\n2. flat\u0000"},
+            {"name":"","players":"singles","text":"x"},
+            {"name":"Bad players","players":"triples","text":"x"},
+            {"name":"Bad style","players":"singles","style":"sideways","text":"x"}
+        ]}"#;
+        let (all, report) = import_file(json, &mine).unwrap();
+        let names: Vec<&str> = all.iter().map(|d| d.name.as_str()).collect();
+        assert_eq!(names, vec!["Rally", "Rally (2)", "Rally (3)", "Tab here and bell"]);
+        assert_eq!(all[3].text, "1. lob\n2. flat");
+        assert_eq!(all[3].mode, Some(Mode::Offensive));
+        assert_eq!(report, ImportReport { added: 1, renamed: 2, unchanged: 0, skipped: 3 });
+        // Every imported drill survives the browser-storage format.
+        for d in &all {
+            assert_eq!(decode_saved(&d.name, &encode_saved(d)).as_ref(), Some(d));
+            assert!(!d.name.contains(['\t', '\n']));
+        }
+    }
+
+    #[test]
+    fn import_rejects_other_files() {
+        assert!(import_file("not json", &[]).is_err());
+        assert!(import_file(r#"{"format":"something else","version":1,"drills":[]}"#, &[]).is_err());
+        assert!(import_file(r#"{"format":"pusun-web drills","version":2,"drills":[]}"#, &[]).unwrap_err().en.contains("newer"));
+        assert!(import_file(&" ".repeat(MAX_IMPORT_BYTES + 1), &[]).unwrap_err().en.contains("too large"));
+        let many = format!(r#"{{"format":"pusun-web drills","version":1,"drills":[{}]}}"#,
+            (0..MAX_IMPORT_DRILLS + 3).map(|i| format!(r#"{{"name":"d{i}","players":"singles","text":""}}"#)).collect::<Vec<_>>().join(","));
+        let (all, report) = import_file(&many, &[]).unwrap();
+        assert_eq!((all.len(), report.skipped), (MAX_IMPORT_DRILLS, 3));
+    }
+
+    #[test]
     fn same_point_needs_same_shot() {
         let lines = parse("1. topspin deep\n2. lob deep", false).unwrap();
         let err = generate(&lines, false, None).unwrap_err();
@@ -643,8 +835,6 @@ mod view {
     use crate::ui::{self, Help, tr};
     use leptos::prelude::*;
 
-    /// Longest text accepted, in characters; 15 lines of description fit easily.
-    const MAX_TEXT: usize = 2000;
     /// Browser storage key for saved drills, one `name<TAB>fields` line each.
     const SAVED_KEY: &str = "pusun-web.builder-drills";
 
@@ -654,6 +844,43 @@ mod view {
 
     fn store_saved(all: &[Saved]) {
         save_named(SAVED_KEY, all.iter().map(|d| (d.name.clone(), encode_saved(d))));
+    }
+
+    /// Hands the browser a file to save, named after today's date.
+    fn download(contents: &str) -> Result<(), String> {
+        use wasm_bindgen::JsCast;
+        let parts = js_sys::Array::of1(&contents.into());
+        let options = web_sys::BlobPropertyBag::new();
+        options.set_type("application/json");
+        let blob = web_sys::Blob::new_with_str_sequence_and_options(&parts, &options).map_err(|_| "blob")?;
+        let url = web_sys::Url::create_object_url_with_blob(&blob).map_err(|_| "url")?;
+        let date = js_sys::Date::new_0().to_iso_string().as_string().unwrap_or_default();
+        let a: web_sys::HtmlAnchorElement = document().create_element("a").map_err(|_| "a")?.unchecked_into();
+        a.set_href(&url);
+        a.set_download(&format!("pusun-drills-{}.json", date.get(..10).unwrap_or("export")));
+        a.click();
+        // Give the download a moment to start before releasing the blob.
+        set_timeout(move || { let _ = web_sys::Url::revoke_object_url(&url); }, std::time::Duration::from_secs(10));
+        Ok(())
+    }
+
+    fn report_text(r: &ImportReport) -> (String, String) {
+        let n = r.added + r.renamed;
+        let mut en = format!("Imported {n} {}.", if n == 1 { "drill" } else { "drills" });
+        let mut nl = format!("{n} {} geïmporteerd.", if n == 1 { "oefening" } else { "oefeningen" });
+        if r.renamed > 0 {
+            en += &format!(" {} got a number after the name because that name was taken.", r.renamed);
+            nl += &format!(" {} kreeg een nummer achter de naam omdat die naam al bestond.", r.renamed);
+        }
+        if r.unchanged > 0 {
+            en += &format!(" {} {} already saved.", r.unchanged, if r.unchanged == 1 { "was" } else { "were" });
+            nl += &format!(" {} {} al opgeslagen.", r.unchanged, if r.unchanged == 1 { "was" } else { "waren" });
+        }
+        if r.skipped > 0 {
+            en += &format!(" {} damaged {} left out.", r.skipped, if r.skipped == 1 { "entry was" } else { "entries were" });
+            nl += &format!(" {} beschadigde {} overgeslagen.", r.skipped, if r.skipped == 1 { "invoer is" } else { "invoeren zijn" });
+        }
+        (en, nl)
     }
 
     fn say(p: &Problem) -> String {
@@ -726,13 +953,41 @@ mod view {
         };
         let names = Signal::derive(move || saved.get().into_iter().map(|d| d.name).collect::<Vec<_>>());
         // Plain text only: drop control characters other than line breaks and tabs.
-        let on_input = move |ev| {
-            let v: String = event_target_value(&ev)
-                .chars()
-                .filter(|c| !c.is_control() || *c == '\n' || *c == '\t')
-                .take(MAX_TEXT)
-                .collect();
-            text.set(v);
+        let on_input = move |ev| text.set(clean_text(&event_target_value(&ev)));
+
+        // Export and import of saved drills as a file. `file_note` is (is_error, en, nl).
+        let file_note = RwSignal::new(None::<(bool, String, String)>);
+        let file_input = NodeRef::<leptos::html::Input>::new();
+        let export = move |_| {
+            let ok = download(&export_file(&saved.get_untracked())).is_ok();
+            file_note.set((!ok).then(|| (true, "The browser did not start the download.".into(), "De browser startte de download niet.".into())));
+        };
+        let import = move |_| {
+            let Some(input) = file_input.get_untracked() else { return };
+            let Some(file) = input.files().and_then(|f| f.get(0)) else { return };
+            // Let the same file be chosen again later.
+            input.set_value("");
+            if file.size() > MAX_IMPORT_BYTES as f64 {
+                file_note.set(Some((true, "The file is too large to be a drill file (over 1 MB).".into(),
+                    "Het bestand is te groot voor een oefeningenbestand (meer dan 1 MB).".into())));
+                return;
+            }
+            leptos::task::spawn_local(async move {
+                let read = wasm_bindgen_futures::JsFuture::from(file.text()).await.ok().and_then(|v| v.as_string());
+                let Some(json) = read else {
+                    file_note.set(Some((true, "The file could not be read.".into(), "Het bestand kon niet worden gelezen.".into())));
+                    return;
+                };
+                match import_file(&json, &saved.get_untracked()) {
+                    Ok((all, report)) => {
+                        store_saved(&all);
+                        saved.set(all);
+                        let (en, nl) = report_text(&report);
+                        file_note.set(Some((false, en, nl)));
+                    }
+                    Err(p) => file_note.set(Some((true, p.en, p.nl))),
+                }
+            });
         };
         let mode_box = move |m: Mode, label: &'static str| {
             let id = if m == Mode::Offensive { "builder-offensive" } else { "builder-defensive" };
@@ -787,6 +1042,15 @@ mod view {
                 <div class="builder-saved">
                     <SavedList title="Saved drills" noun="drill" names=names can_save=Signal::derive(move || source.get().is_some())
                         on_load=load on_delete=delete on_save=save />
+                    <div class="row">
+                        <span class="with-help"><button on:click=export disabled=move || saved.get().is_empty()>{move || tr("Export file")}</button><Help topic="Export file" /></span>
+                        <span class="with-help"><button on:click=move |_| { if let Some(i) = file_input.get_untracked() { i.click() } }>{move || tr("Import file")}</button><Help topic="Import file" /></span>
+                        <input type="file" accept=".json,application/json" hidden node_ref=file_input on:change=import
+                            aria-label=move || tr("Import file") />
+                    </div>
+                    {move || file_note.get().map(|(error, en, nl)| view! {
+                        <p class=if error { "error" } else { "hint" } role="status">{if ui::dutch() { nl } else { en }}</p>
+                    })}
                 </div>
             </section>
         }
