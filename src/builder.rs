@@ -555,6 +555,14 @@ pub fn import_file(json: &str, existing: &[Saved]) -> Result<(Vec<Saved>, Import
     Ok((all, report))
 }
 
+/// A ball in words, English and Dutch: "Topspin · deep left (point 23)". In doubles the
+/// side is said within that player's half, as [`describe_planned`] does.
+pub fn ball_words(p: &Planned, doubles: bool) -> (String, String) {
+    let ((d_en, d_nl), (s_en, s_nl)) = describe_planned(p, doubles);
+    let (n_en, n_nl) = p.shot.name();
+    (format!("{n_en} · {d_en} {s_en} (point {})", p.point), format!("{n_nl} · {d_nl} {s_nl} (punt {})", p.point))
+}
+
 /// One ball of a generated drill, for the list under the court.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Planned {
@@ -887,10 +895,12 @@ mod view {
         if ui::dutch() { p.nl.clone() } else { p.en.clone() }
     }
 
-    /// The Drill Builder panel. `on_start` loads and starts a drill, `on_edit` loads it into
-    /// Vary Speed; both are disabled while no machine is connected, like the library's.
+    /// The Drill Builder panel. `on_generate` receives every drill as it is generated (the
+    /// app puts its balls in Vary Speed); `on_start` loads and starts a drill and is disabled
+    /// while no machine is connected, like the library's; `on_edit` shows it in Vary Speed.
     #[component]
     pub fn DrillBuilder(
+        on_generate: impl Fn(&Generated) + Copy + Send + Sync + 'static,
         on_start: impl Fn(&Generated) + Copy + Send + Sync + 'static,
         on_edit: impl Fn(&Generated) + Copy + Send + Sync + 'static,
         on_stop: impl Fn() + Copy + Send + Sync + 'static,
@@ -919,6 +929,7 @@ mod view {
             let (text, mode) = (text.get_untracked(), mode.get_untracked());
             match parse(&text, doubles).and_then(|lines| generate(&lines, doubles, mode)) {
                 Ok(g) => {
+                    on_generate(&g);
                     problems.set(Vec::new());
                     result.set(Some(g));
                     source.set(Some(Saved { name: String::new(), text, mode, doubles }));
@@ -1093,15 +1104,14 @@ mod view {
                 <div class="builder-court" inner_html=svg></div>
                 <ol class="builder-balls">
                     {planned.into_iter().map(|p| {
-                        let ((d_en, d_nl), (s_en, s_nl)) = describe_planned(&p, doubles);
-                        let (n_en, n_nl) = p.shot.name();
+                        let (en, nl) = ball_words(&p, doubles);
                         let who = doubles.then(|| if p.player == 0 {
                             view! { <i class="key-p1" title=move || tr("Right-hand player")>"1"</i> }.into_any()
                         } else {
                             view! { <i class="key-p2" title=move || tr("Left-hand player")>"2"</i> }.into_any()
                         });
                         view! {
-                            <li>{who}{move || if ui::dutch() { format!("{n_nl} · {d_nl} {s_nl} (punt {})", p.point) } else { format!("{n_en} · {d_en} {s_en} (point {})", p.point) }}</li>
+                            <li>{who}{move || if ui::dutch() { nl.clone() } else { en.clone() }}</li>
                         }
                     }).collect_view()}
                 </ol>

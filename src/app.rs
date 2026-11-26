@@ -286,6 +286,15 @@ impl Ctx {
     }
 }
 
+/// Scrolls to Vary Speed with its heading just below the sticky Start/Stop bar, which
+/// would otherwise cover it.
+fn show_vary_speed() {
+    let Some(el) = document().get_element_by_id("vary-speed") else { return };
+    let bar = document().query_selector("main .sticky").ok().flatten().map_or(0.0, |s| s.get_bounding_client_rect().height());
+    let top = el.get_bounding_client_rect().top() + window().scroll_y().unwrap_or(0.0) - bar - 8.0;
+    window().scroll_to_with_x_and_y(0.0, top.max(0.0));
+}
+
 fn storage() -> Option<web_sys::Storage> {
     web_sys::window()?.local_storage().ok().flatten()
 }
@@ -596,6 +605,9 @@ pub fn App() -> impl IntoView {
 
     // Vary Speed drills.
     let drill = RwSignal::new(Vec::<u8>::new());
+    // Names for the balls of a drill made in the Drill Builder: (point, player in doubles,
+    // English, Dutch) per position. Shown while the route still starts with those points.
+    let drill_labels = RwSignal::new(Vec::<(u8, Option<usize>, String, String)>::new());
     let pause = RwSignal::new(DrillPause::None);
     let drill_params = RwSignal::new(DrillPoint::defaults());
     let routes = RwSignal::new(load_routes());
@@ -639,11 +651,16 @@ pub fn App() -> impl IntoView {
         });
         pause.set(drill_pause);
         drill.set(points);
+        drill_labels.set(Vec::new());
     };
     let load_library_drill = move |d: &'static Drill| load_drill(d.params_at(difficulty.get_untracked()), d.pause, d.points());
     let load_generated = move |g: &builder::Generated| {
         let d = g.drill();
         load_drill(d.params_at(difficulty.get_untracked()), d.pause, d.points());
+        drill_labels.set(g.planned.iter().map(|p| {
+            let (en, nl) = builder::ball_words(p, g.doubles);
+            (p.point, g.doubles.then_some(p.player), en, nl)
+        }).collect());
     };
     // Editing a shot changes its point and is sent to the machine straight away, like the app.
     let edit_shot = move |position: usize, f: &dyn Fn(&mut DrillPoint)| {
@@ -663,6 +680,7 @@ pub fn App() -> impl IntoView {
         let pts = p::ai_drill(ai.get_untracked(), &mut params, |n| (js_sys::Math::random() * n as f64) as usize % n);
         drill_params.set(params);
         drill.set(pts);
+        drill_labels.set(Vec::new());
     };
     let save_route = move |name: String| {
         let pts = drill.get_untracked();
@@ -688,6 +706,7 @@ pub fn App() -> impl IntoView {
         });
         pause.set(r.pause);
         drill.set(r.points);
+        drill_labels.set(Vec::new());
     };
     let delete_route = move |name: String| {
         routes.update(|r| {
@@ -767,9 +786,8 @@ pub fn App() -> impl IntoView {
         drill_params.update(|d| d.iter_mut().for_each(|p| p.interval = p::DRILL_INTERVAL_DEFAULT));
         pause.set(DrillPause::None);
         drill.set(points);
-        if let Some(el) = document().get_element_by_id("vary-speed") {
-            el.scroll_into_view();
-        }
+        drill_labels.set(Vec::new());
+        show_vary_speed();
     };
 
     // The app's "Paddle Tennis" / "Tennis" button opens the other screen, which
@@ -845,6 +863,7 @@ pub fn App() -> impl IntoView {
         // than removed when closed, so the text and choices survive closing the panel.
         <div id="drill-builder" hidden=move || !builder_open.get()>
             <DrillBuilder
+                on_generate=load_generated
                 on_start=move |g: &builder::Generated| {
                     load_generated(g);
                     start_current_drill();
@@ -852,7 +871,7 @@ pub fn App() -> impl IntoView {
                 }
                 on_edit=move |g: &builder::Generated| {
                     load_generated(g);
-                    if let Some(el) = document().get_element_by_id("vary-speed") { el.scroll_into_view(); }
+                    show_vary_speed();
                 }
                 on_stop=move || stop()
                 connected=Signal::derive(connected)
@@ -1026,15 +1045,32 @@ pub fn App() -> impl IntoView {
                     </select>
                     <span class="with-help"><button on:click=move |_| drill.update(|d| { d.pop(); })>{move || tr("Undo")}</button><Help topic="Undo" /></span>
                     <span class="with-help"><button on:click=move |_| drill.set(Vec::new())>{move || tr("Clear")}</button><Help topic="Clear" /></span>
-                    <span class="with-help"><button class="primary" on:click=start_drill disabled=move || drill.get().is_empty()>{move || tr("Start drill")}</button><Help topic="Start drill" /></span>
+                    <span class="with-help"><button class="primary" on:click=start_drill disabled=move || drill.get().is_empty() || !connected()>{move || tr("Start drill")}</button><Help topic="Start drill" /></span>
                 </div>
 
                 <div class="shots">
-                    {move || drill.get().into_iter().enumerate().map(|(i, id)| {
+                    {move || {
+                        let pts = drill.get();
+                        let labels = drill_labels.get();
+                        // Labels hold only for the positions where the route still matches them.
+                        let named = pts.iter().zip(&labels).take_while(|(id, l)| **id == l.0).count();
+                        pts.into_iter().enumerate().map(|(i, id)| {
                         let d = drill_params.get()[(id - 1) as usize];
+                        let label = labels.get(i).filter(|_| i < named).cloned();
+                        let heading = match label {
+                            Some((_, player, en, nl)) => {
+                                let badge = player.map(|pl| if pl == 0 {
+                                    view! { <i class="key-p1" title=move || tr("Right-hand player")>"1"</i> }.into_any()
+                                } else {
+                                    view! { <i class="key-p2" title=move || tr("Left-hand player")>"2"</i> }.into_any()
+                                });
+                                view! { <strong>{format!("#{} · ", i + 1)}{badge}{move || if ui::dutch() { nl.clone() } else { en.clone() }}</strong> }.into_any()
+                            }
+                            None => view! { <strong>{move || format!("#{} · {} {id}", i + 1, tr("point"))}</strong> }.into_any(),
+                        };
                         view! {
                             <div class="shot">
-                                <strong>{move || format!("#{} · {} {id}", i + 1, tr("point"))}</strong>
+                                {heading}
                                 <Stepper label="Left ↔ right" value=p::lr_percent_label(p::drill_lr_percent(d.lr)) dec_label="◀" inc_label="▶"
                                     dec=move || edit_shot(i, &|p| p.lr = p.lr.saturating_add(30))
                                     inc=move || edit_shot(i, &|p| p.lr = p.lr.saturating_sub(30)) />
@@ -1052,7 +1088,8 @@ pub fn App() -> impl IntoView {
                                     inc=move || edit_shot(i, &|p| p.spin = p.spin.saturating_add(5)) />
                             </div>
                         }
-                    }).collect_view()}
+                    }).collect_view()
+                    }}
                 </div>
 
                 <SavedList title="Saved routes" noun="route" names=route_names can_save=Signal::derive(move || !drill.get().is_empty())
@@ -1147,7 +1184,7 @@ pub fn App() -> impl IntoView {
                                     on:click=move |_| stop()>{move || tr("Stop")}</button><Help topic="Drill stop" /></span>
                                     <span class="with-help"><button on:click=move |_| {
                                         load_library_drill(d);
-                                        if let Some(el) = document().get_element_by_id("vary-speed") { el.scroll_into_view(); }
+                                        show_vary_speed();
                                     }>{move || tr("Edit")}</button><Help topic="Drill edit" /></span>
                                 </div>
                             </article>
