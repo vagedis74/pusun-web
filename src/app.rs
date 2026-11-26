@@ -6,6 +6,7 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 
 use crate::ble::Machine;
+use crate::builder::{self, DrillBuilder};
 use crate::courses::Courses;
 use crate::drills::{self, DIFFICULTIES, Drill, LIBRARY};
 use crate::protocol::{self as p, AiOptions, CustomPoint, DrillPause, DrillPoint, Frame, Height, Notification, Pattern, PatternDefault, ProgramSettings, RawPoint, Sport};
@@ -629,14 +630,20 @@ pub fn App() -> impl IntoView {
             let _ = st.set_item(DIFFICULTY_KEY, &level.to_string());
         }
     };
-    let load_library_drill = move |d: &'static Drill| {
-        drill_params.update(|params| {
-            for (id, pt) in d.params_at(difficulty.get_untracked()) {
-                params[(id - 1) as usize] = pt;
+    // Loads a drill's points and per-point settings into Vary Speed at the chosen difficulty.
+    let load_drill = move |params: Vec<(u8, DrillPoint)>, drill_pause: DrillPause, points: Vec<u8>| {
+        drill_params.update(|all| {
+            for (id, pt) in params {
+                all[(id - 1) as usize] = pt;
             }
         });
-        pause.set(d.pause);
-        drill.set(d.points());
+        pause.set(drill_pause);
+        drill.set(points);
+    };
+    let load_library_drill = move |d: &'static Drill| load_drill(d.params_at(difficulty.get_untracked()), d.pause, d.points());
+    let load_generated = move |g: &builder::Generated| {
+        let d = g.drill();
+        load_drill(d.params_at(difficulty.get_untracked()), d.pause, d.points());
     };
     // Editing a shot changes its point and is sent to the machine straight away, like the app.
     let edit_shot = move |position: usize, f: &dyn Fn(&mut DrillPoint)| {
@@ -792,6 +799,7 @@ pub fn App() -> impl IntoView {
     let pt7_padel = move || padel() && ctx.name.get().is_some_and(|n| n.starts_with("PT7"));
 
     let connected = move || ctx.name.get().is_some();
+    let builder_open = RwSignal::new(false);
     let is_program = move || matches!(pattern.get(), Pattern::Program(_));
     let is_custom = move || matches!(pattern.get(), Pattern::Custom(_));
 
@@ -810,6 +818,9 @@ pub fn App() -> impl IntoView {
                 <span class="with-help"><button class="mode" class:selected=move || !padel() on:click=move |_| switch_sport(Sport::Tennis)>"Tennis"</button><Help topic="Tennis" /></span>
                 <span class="with-help"><button class="mode" class:selected=padel on:click=move |_| switch_sport(Sport::Padel)>"Padel"</button><Help topic="Padel" /></span>
             </div>
+            <span class="with-help"><button class="mode" class:selected=move || builder_open.get()
+                aria-expanded=move || if builder_open.get() { "true" } else { "false" } aria-controls="drill-builder"
+                on:click=move |_| builder_open.update(|open| *open = !*open)>{move || tr("Drill Builder")}</button><Help topic="Drill Builder" /></span>
             <Show
                 when=connected
                 fallback=move || view! {
@@ -829,6 +840,25 @@ pub fn App() -> impl IntoView {
                 <span class="with-help"><button on:click=disconnect>{move || tr("Disconnect")}</button><Help topic="Disconnect" /></span>
             </Show>
         </header>
+
+        // Outside <main>, so it can be used before a machine is connected. Hidden rather
+        // than removed when closed, so the text and choices survive closing the panel.
+        <div id="drill-builder" hidden=move || !builder_open.get()>
+            <DrillBuilder
+                on_start=move |g: &builder::Generated| {
+                    load_generated(g);
+                    start_current_drill();
+                    active_drill.set(Some("builder"));
+                }
+                on_edit=move |g: &builder::Generated| {
+                    load_generated(g);
+                    if let Some(el) = document().get_element_by_id("vary-speed") { el.scroll_into_view(); }
+                }
+                on_stop=move || stop()
+                connected=Signal::derive(connected)
+                playing=Signal::derive(move || running.get() && active_drill.get() == Some("builder"))
+                difficulty=difficulty.into() />
+        </div>
 
         <Show when=move || ctx.error.get().is_some()>
             <div class="error">{move || ctx.error.get().map(|msg| ui::message(&msg))} " " <span class="with-help"><button on:click=move |_| ctx.error.set(None)>{move || tr("Dismiss")}</button><Help topic="Dismiss" /></span></div>

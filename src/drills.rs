@@ -23,7 +23,7 @@ impl Level {
 
 /// One ball of a drill, as a change from the grid point's default.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct Ball {
+pub(crate) struct Ball {
     point: u8,
     /// Height (`ud`); `None` keeps the default 2000.
     height: Option<u16>,
@@ -39,7 +39,7 @@ const fn ball(point: u8, interval: u8) -> Ball {
     Ball { point, height: None, speed: 0, interval, spin: 0 }
 }
 
-const fn shaped(point: u8, height: u16, speed: i8, interval: u8, spin: i8) -> Ball {
+pub(crate) const fn shaped(point: u8, height: u16, speed: i8, interval: u8, spin: i8) -> Ball {
     Ball { point, height: Some(height), speed, interval, spin }
 }
 
@@ -52,7 +52,7 @@ pub struct Spot {
     pub y: f32,
 }
 
-const fn at(x: f32, y: f32) -> Spot {
+pub(crate) const fn at(x: f32, y: f32) -> Spot {
     Spot { x, y }
 }
 
@@ -365,7 +365,9 @@ const INTERVAL_STEP: i16 = 5;
 /// Speed change per difficulty step. Kept small: speed also sets how deep a ball lands.
 const SPEED_STEP: i16 = 3;
 
-pub struct Drill {
+/// A drill. Library drills borrow `'static` data; a generated one borrows from its owner
+/// (see `builder::Generated`).
+pub struct Drill<'a> {
     pub key: &'static str,
     pub name: (&'static str, &'static str),
     pub description: (&'static str, &'static str),
@@ -373,23 +375,23 @@ pub struct Drill {
     /// Written for two players on one side of the net.
     pub doubles: bool,
     pub pause: DrillPause,
-    balls: &'static [Ball],
+    pub(crate) balls: &'a [Ball],
     /// Where to put the machine on the far side.
     pub machine: Spot,
     /// Where each player starts: the player who gets the first ball, then the partner.
-    pub players: &'static [Spot],
+    pub players: &'a [Spot],
     /// Which player (index into `players`) takes each ball; empty to work it out from
     /// where the balls land (see [`receivers`]).
-    receivers: &'static [usize],
+    pub(crate) receivers: &'a [usize],
     /// The stroke for each ball; empty to work it out from each ball's height and speed
     /// and where it lands (see [`shots`]).
-    strokes: &'static [Stroke],
+    pub(crate) strokes: &'a [Stroke],
     /// How far from the net each ball is hit, in metres; empty, or 0.0 for a ball, to work
     /// it out from the stroke (see [`shots`]).
-    hit_depths: &'static [f32],
+    pub(crate) hit_depths: &'a [f32],
 }
 
-impl Drill {
+impl Drill<'_> {
     /// Play order as grid points.
     pub fn points(&self) -> Vec<u8> {
         self.balls.iter().map(|b| b.point).collect()
@@ -422,7 +424,7 @@ pub fn interval_range(params: &[(u8, DrillPoint)]) -> (u8, u8) {
     (it.clone().min().unwrap_or(0), it.max().unwrap_or(0))
 }
 
-pub const LIBRARY: &[Drill] = &[
+pub const LIBRARY: &[Drill<'static>] = &[
     Drill {
         key: "warmup",
         name: ("Warm-up rally", "Warming-up rally"),
