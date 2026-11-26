@@ -338,6 +338,25 @@ pub fn App() -> impl IntoView {
     let running = RwSignal::new(false);
     // Key of the library drill started last, so its card can show it is playing.
     let active_drill = RwSignal::new(None::<&'static str>);
+    // The drill whose court popup is open. Tracked here instead of left to CSS :hover and
+    // :focus, which some phone browsers keep after a tap elsewhere, so a click or tap
+    // outside the popup (or Escape) always closes it.
+    let open_pop = RwSignal::new(None::<&'static str>);
+    let close_unless_inside = move |target: Option<web_sys::EventTarget>| {
+        use wasm_bindgen::JsCast;
+        let Some(open) = open_pop.get_untracked() else { return };
+        let inside = target
+            .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
+            .and_then(|el| el.closest(".drill-name").ok().flatten())
+            .and_then(|name| name.get_attribute("data-drill"))
+            .is_some_and(|key| key == open);
+        if !inside {
+            open_pop.set(None);
+        }
+    };
+    let _ = window_event_listener(leptos::ev::pointerdown, move |e| close_unless_inside(e.target()));
+    let _ = window_event_listener(leptos::ev::focusin, move |e| close_unless_inside(e.target()));
+    let _ = window_event_listener(leptos::ev::keydown, move |e| if e.key() == "Escape" { open_pop.set(None) });
     let connecting = RwSignal::new(false);
 
     let sport = RwSignal::new(match storage().and_then(|s| s.get_item(SPORT_KEY).ok().flatten()).as_deref() {
@@ -1145,10 +1164,11 @@ pub fn App() -> impl IntoView {
                             <article class="drill" id=format!("drill-{}", d.key)
                                 class:playing=move || running.get() && active_drill.get() == Some(d.key)>
                                 <div class="drill-head">
-                                    <span class="drill-name" tabindex="0"
+                                    <span class="drill-name" tabindex="0" data-drill=d.key
+                                        class:open=move || open_pop.get() == Some(d.key)
                                         on:mouseenter=move |e| restart_animation(&e)
-                                        on:focusin=move |e| restart_animation(&e)
-                                        on:click=move |e| restart_on_name_tap(&e)>
+                                        on:focusin=move |e| { open_pop.set(Some(d.key)); restart_animation(&e) }
+                                        on:click=move |e| { open_pop.set(Some(d.key)); restart_on_name_tap(&e) }>
                                         <strong>{name}</strong>
                                         <span class="court-pop" role="tooltip">
                                             <b>{move || tr("Setup")}</b>
