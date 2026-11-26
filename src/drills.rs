@@ -841,6 +841,31 @@ pub const LIBRARY: &[Drill<'static>] = &[
         hit_depths: &[],
         balls: &[shaped(23, 3800, -10, 60, 0), shaped(27, 3800, -10, 60, 0)],
     },
+    Drill {
+        key: "nucleair",
+        name: ("Nucleair Tennis", "Nucleair Tennis"),
+        description: (
+            "Fully offensive from both sides. Very fast, low balls land about half a metre inside the baseline: heavy topspin to the forehand and backhand, then attacking slices into each corner. Stand inside the baseline and take every ball early.",
+            "Volledig aanvallend aan beide kanten. Zeer snelle, lage ballen komen ongeveer een halve meter voor de achterlijn neer: zware topspin op forehand en backhand, daarna aanvallende slices in elke hoek. Sta binnen de achterlijn en neem elke bal vroeg.",
+        ),
+        level: Level::Advanced,
+        doubles: false,
+        pause: DrillPause::None,
+        machine: MACHINE,
+        // Inside the baseline, taking each ball early just after the bounce.
+        players: &[at(0.0, 11.5)],
+        receivers: &[],
+        strokes: &[Stroke::Groundstroke, Stroke::Groundstroke, Stroke::Groundstroke, Stroke::Groundstroke],
+        hit_depths: &[11.2, 11.2, 11.2, 11.2],
+        // Deepest row, low (height 16–17) and near the machine's top speed; topspin +6 to
+        // the forehand and backhand side, slice −5 into the right and left corners.
+        balls: &[
+            shaped(26, 1700, 16, 30, 6),
+            shaped(22, 1600, 18, 30, -5),
+            shaped(24, 1700, 16, 30, 6),
+            shaped(28, 1600, 18, 30, -5),
+        ],
+    },
 ];
 
 #[cfg(test)]
