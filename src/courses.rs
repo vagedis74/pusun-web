@@ -147,12 +147,16 @@ impl Course {
             .collect()
     }
 
+    /// Absolute HTTPS routes are used as given; other absolute URLs (plain HTTP, other
+    /// schemes, protocol-relative) are dropped; anything else is a path under [`BASE_URL`].
     pub fn image(&self) -> Option<String> {
         let r = self.image_route.as_deref()?.trim();
         if r.is_empty() {
             None
-        } else if r.contains("http") {
+        } else if r.get(..8).is_some_and(|s| s.eq_ignore_ascii_case("https://")) {
             Some(r.to_string())
+        } else if r.starts_with("//") || r.contains(':') {
+            None
         } else {
             Some(format!("{BASE_URL}{}", r.trim_start_matches('/')))
         }
@@ -363,6 +367,10 @@ mod tests {
         assert_eq!(c.image().as_deref(), Some("https://www.pusuntech.com/Upload/a.png"));
         let abs = Course { image_route: Some("https://cdn/x.png".into()), ..c };
         assert_eq!(abs.image().as_deref(), Some("https://cdn/x.png"));
+        for bad in ["http://cdn/x.png", "javascript:alert(1)", "//cdn/x.png", "data:image/png;base64,AA"] {
+            let c = Course { image_route: Some(bad.into()), ..abs.clone() };
+            assert_eq!(c.image(), None, "{bad}");
+        }
     }
 }
 
