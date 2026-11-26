@@ -10,7 +10,7 @@ on:
 permissions:
   contents: read
 
-# One deployment at a time; a newer push replaces a queued one.
+# One deployment at a time; a newer run waits for the current one.
 concurrency:
   group: pages
   cancel-in-progress: false
