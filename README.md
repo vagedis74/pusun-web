@@ -23,14 +23,17 @@ Live build: https://pusun.kingconfig.com, served from this machine through a Clo
 Tunnel and protected by Cloudflare Access (Zero Trust application `pusun`): only the allowed
 email addresses can log in, with a one-time code or another configured login method.
 `server/install.sh` installs two user services: `pusun-web-origin` runs `server/server.py`
-on `127.0.0.1:8917` (it marks HTML `no-cache` so phones pick up new builds), and
+on `127.0.0.1:8917` (it marks HTML `no-cache` so phones pick up new builds, sends a
+Content-Security-Policy that allows Trunk's inline loader script by its hash, and does not list
+directories), and
 `pusun-web-tunnel` runs `cloudflared` with the token in `~/.config/pusun-web/tunnel.token`
 (not in the repo). To publish a build: `trunk build --release && ./deploy.sh`. `deploy.sh`
 keeps the site folder's `courses.json`, a saved copy of the course list.
 
 The GitHub Pages deploy (`.github/workflows/pages.yml`) is disabled and the Pages site is
 unpublished, because Pages cannot require a login. The workflow file is kept as a reference
-for building `courses.json`.
+for building `courses.json`; it only runs when started by hand, its actions are pinned to
+commit SHAs, and only the deploy job gets the Pages write and OIDC token permissions.
 
 Web Bluetooth only works in **Chrome or Edge** (desktop or Android) on `https://` or
 `http://localhost`. Safari and all iOS browsers do not support it. To use a phone, host
