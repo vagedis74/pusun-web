@@ -41,9 +41,17 @@ def script_hashes(html: bytes) -> str:
 
 
 class Handler(http.server.SimpleHTTPRequestHandler):
+    status = None
+
+    def send_response(self, code, message=None):
+        self.status = code
+        super().send_response(code, message)
+
     def end_headers(self):
         path = self.path.split("?", 1)[0].split("#", 1)[0]
-        if HASHED.search(path):
+        # Only a file that exists may be cached for good: a 404 for a hashed name that a
+        # deploy has not copied yet must not stick in browser or edge caches.
+        if self.status in (http.HTTPStatus.OK, http.HTTPStatus.NOT_MODIFIED) and HASHED.search(path):
             self.send_header("Cache-Control", "public, max-age=31536000, immutable")
         else:
             self.send_header("Cache-Control", "no-cache")

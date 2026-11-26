@@ -13,6 +13,9 @@ if [[ ! -f "$SRC/index.html" ]]; then
 fi
 
 mkdir -p "$DEST"
+# Copy the new hashed assets first and index.html last, so a page load during the
+# deploy never gets an index.html whose .js/.wasm/.css are not there yet.
+rsync -a --exclude=/index.html "$SRC" "$DEST"
 # --delete drops stale hashed .js/.wasm/.css files from earlier builds.
 # courses.json is not part of the build (it is a saved copy of Pusun's course
 # list that the Courses section falls back to), so keep it.
