@@ -35,6 +35,7 @@ pub fn tr(en: &str) -> &str {
         "Offensive" => "Aanvallend",
         "Defensive" => "Verdedigend",
         "Generate Drill" => "Oefening maken",
+        "Saved drills" => "Opgeslagen oefeningen",
         "Right-hand player" => "Rechterspeler",
         "Left-hand player" => "Linkerspeler",
         "Battery" => "Batterij",

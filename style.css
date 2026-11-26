@@ -129,3 +129,5 @@ main.disabled .help-dialog, .advanced.disabled .help-dialog { pointer-events: au
 .builder-court svg { display: block; width: 11rem; height: auto; margin: .2rem auto; }
 .builder-balls { margin: 0; padding-left: 1.6rem; display: grid; gap: .15rem; font-size: .9rem; font-variant-numeric: tabular-nums; }
 .builder-balls li i { display: inline-grid; place-items: center; width: 1rem; height: 1rem; margin-right: .35rem; font-style: normal; font-size: .65rem; font-weight: 700; color: #fff; vertical-align: -.1rem; }
+.builder-saved h3 { margin: .4rem 0 0; }
+.builder-saved .row { margin-top: .3rem; }

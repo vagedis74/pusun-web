@@ -354,6 +354,68 @@ pub fn describe_planned(p: &Planned, doubles: bool) -> ((&'static str, &'static 
     (depth, side)
 }
 
+/// What a saved drill keeps: the text and choices it was generated from, so loading it
+/// fills the panel again and regenerates the same drill.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Saved {
+    pub name: String,
+    pub text: String,
+    pub mode: Option<Mode>,
+    pub doubles: bool,
+}
+
+/// The stored fields after the name: `mode<TAB>players<TAB>text`, with backslashes,
+/// tabs and line breaks in the text escaped so each drill stays on one line.
+pub fn encode_saved(d: &Saved) -> String {
+    let mode = match d.mode {
+        Some(Mode::Offensive) => "offensive",
+        Some(Mode::Defensive) => "defensive",
+        None => "",
+    };
+    let mut text = String::with_capacity(d.text.len());
+    for c in d.text.chars() {
+        match c {
+            '\\' => text.push_str("\\\\"),
+            '\n' => text.push_str("\\n"),
+            '\t' => text.push_str("\\t"),
+            '\r' => {}
+            c => text.push(c),
+        }
+    }
+    format!("{mode}\t{}\t{text}", if d.doubles { "doubles" } else { "singles" })
+}
+
+/// Reads what [`encode_saved`] wrote; `None` for a damaged record.
+pub fn decode_saved(name: &str, fields: &str) -> Option<Saved> {
+    let mut parts = fields.splitn(3, '\t');
+    let mode = match parts.next()? {
+        "offensive" => Some(Mode::Offensive),
+        "defensive" => Some(Mode::Defensive),
+        "" => None,
+        _ => return None,
+    };
+    let doubles = match parts.next()? {
+        "doubles" => true,
+        "singles" => false,
+        _ => return None,
+    };
+    let mut text = String::new();
+    let mut chars = parts.next()?.chars();
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            match chars.next()? {
+                'n' => text.push('\n'),
+                't' => text.push('\t'),
+                '\\' => text.push('\\'),
+                _ => return None,
+            }
+        } else {
+            text.push(c);
+        }
+    }
+    Some(Saved { name: name.to_string(), text, mode, doubles })
+}
+
 /// One ball of a generated drill, for the list under the court.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Planned {
@@ -516,6 +578,29 @@ mod tests {
     }
 
     #[test]
+    fn saved_drills_round_trip() {
+        let tricky = Saved {
+            name: "Warm-up".into(),
+            text: "1. topspin deep left\r\n2. slice\tshort right\n3. lob \\ point 25 \\n not a break".into(),
+            mode: Some(Mode::Defensive),
+            doubles: true,
+        };
+        let stored = encode_saved(&tricky);
+        assert!(!stored.contains('\n'), "one line per drill");
+        assert_eq!(stored.matches('\t').count(), 2, "only the two field separators");
+        let back = decode_saved("Warm-up", &stored).unwrap();
+        assert_eq!(back, Saved { text: tricky.text.replace('\r', ""), ..tricky });
+        for mode in [None, Some(Mode::Offensive)] {
+            let d = Saved { name: "x".into(), text: String::new(), mode, doubles: false };
+            assert_eq!(decode_saved("x", &encode_saved(&d)), Some(d));
+        }
+        assert_eq!(decode_saved("x", "attacking\tsingles\t1. lob"), None);
+        assert_eq!(decode_saved("x", "\ttriples\t1. lob"), None);
+        assert_eq!(decode_saved("x", "\tsingles\t1. lob \\q"), None);
+        assert_eq!(decode_saved("x", "\tsingles"), None);
+    }
+
+    #[test]
     fn same_point_needs_same_shot() {
         let lines = parse("1. topspin deep\n2. lob deep", false).unwrap();
         let err = generate(&lines, false, None).unwrap_err();
@@ -554,11 +639,22 @@ pub use view::DrillBuilder;
 #[cfg(target_arch = "wasm32")]
 mod view {
     use super::*;
+    use crate::app::{SavedList, load_named, save_named};
     use crate::ui::{self, Help, tr};
     use leptos::prelude::*;
 
     /// Longest text accepted, in characters; 15 lines of description fit easily.
     const MAX_TEXT: usize = 2000;
+    /// Browser storage key for saved drills, one `name<TAB>fields` line each.
+    const SAVED_KEY: &str = "pusun-web.builder-drills";
+
+    fn load_saved() -> Vec<Saved> {
+        load_named(SAVED_KEY).into_iter().filter_map(|(name, fields)| decode_saved(&name, &fields)).collect()
+    }
+
+    fn store_saved(all: &[Saved]) {
+        save_named(SAVED_KEY, all.iter().map(|d| (d.name.clone(), encode_saved(d))));
+    }
 
     fn say(p: &Problem) -> String {
         if ui::dutch() { p.nl.clone() } else { p.en.clone() }
@@ -581,24 +677,54 @@ mod view {
         let doubles = RwSignal::new(Some(false));
         let problems = RwSignal::new(Vec::<Problem>::new());
         let result = RwSignal::new(None::<Generated>);
+        // The text and choices the shown drill was generated from; this is what Save keeps,
+        // even if the text box has been changed since.
+        let source = RwSignal::new(None::<Saved>);
+        let saved = RwSignal::new(load_saved());
 
-        let generate = move |_| {
+        let run = move || {
             let Some(doubles) = doubles.get_untracked() else {
                 problems.set(vec![problem(0, "Tick Singles or Doubles first.", "Vink eerst Enkelspel of Dubbelspel aan.")]);
                 result.set(None);
+                source.set(None);
                 return;
             };
-            match parse(&text.get_untracked(), doubles).and_then(|lines| generate(&lines, doubles, mode.get_untracked())) {
+            let (text, mode) = (text.get_untracked(), mode.get_untracked());
+            match parse(&text, doubles).and_then(|lines| generate(&lines, doubles, mode)) {
                 Ok(g) => {
                     problems.set(Vec::new());
                     result.set(Some(g));
+                    source.set(Some(Saved { name: String::new(), text, mode, doubles }));
                 }
                 Err(p) => {
                     problems.set(p);
                     result.set(None);
+                    source.set(None);
                 }
             }
         };
+        let save = move |name: String| {
+            let Some(d) = source.get_untracked() else { return };
+            saved.update(|all| {
+                all.retain(|x| x.name != name);
+                all.push(Saved { name, ..d });
+                store_saved(all);
+            });
+        };
+        let load = move |name: String| {
+            let Some(d) = saved.get_untracked().into_iter().find(|x| x.name == name) else { return };
+            text.set(d.text);
+            mode.set(d.mode);
+            doubles.set(Some(d.doubles));
+            run();
+        };
+        let delete = move |name: String| {
+            saved.update(|all| {
+                all.retain(|x| x.name != name);
+                store_saved(all);
+            });
+        };
+        let names = Signal::derive(move || saved.get().into_iter().map(|d| d.name).collect::<Vec<_>>());
         // Plain text only: drop control characters other than line breaks and tabs.
         let on_input = move |ev| {
             let v: String = event_target_value(&ev)
@@ -651,13 +777,17 @@ mod view {
                         {players_box(true, "Doubles")}
                     </fieldset>
                 </div>
-                <span class="with-help"><button class="primary" on:click=generate>{move || tr("Generate Drill")}</button><Help topic="Generate Drill" /></span>
+                <span class="with-help"><button class="primary" on:click=move |_| run()>{move || tr("Generate Drill")}</button><Help topic="Generate Drill" /></span>
                 <Show when=move || !problems.get().is_empty()>
                     <ul class="error builder-problems" role="alert">
                         {move || problems.get().iter().map(|p| view! { <li>{say(p)}</li> }).collect_view()}
                     </ul>
                 </Show>
                 {move || result.get().map(|g| result_card(g, on_start, on_edit, on_stop, connected, playing, difficulty))}
+                <div class="builder-saved">
+                    <SavedList title="Saved drills" noun="drill" names=names can_save=Signal::derive(move || source.get().is_some())
+                        on_load=load on_delete=delete on_save=save />
+                </div>
             </section>
         }
     }

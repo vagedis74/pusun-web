@@ -102,12 +102,12 @@ const PROGRAMS_KEY: &str = "pusun-web.programs";
 const CUSTOM_SETS_KEY: &str = "pusun-web.custom-sets";
 
 /// Named records stored one per line as `name<TAB>fields`.
-fn load_named(key: &str) -> Vec<(String, String)> {
+pub(crate) fn load_named(key: &str) -> Vec<(String, String)> {
     let Some(s) = storage().and_then(|s| s.get_item(key).ok().flatten()) else { return Vec::new() };
     s.lines().filter_map(|l| l.split_once('\t')).map(|(n, v)| (n.to_string(), v.to_string())).collect()
 }
 
-fn save_named(key: &str, items: impl Iterator<Item = (String, String)>) {
+pub(crate) fn save_named(key: &str, items: impl Iterator<Item = (String, String)>) {
     let s = items.map(|(n, v)| format!("{n}\t{v}")).collect::<Vec<_>>().join("\n");
     if let Some(st) = storage() {
         let _ = st.set_item(key, &s);
@@ -1292,7 +1292,7 @@ fn Stepper(
 
 /// Choose / Load / Delete / Save row shared by routes, programs and custom-point sets.
 #[component]
-fn SavedList(
+pub(crate) fn SavedList(
     title: &'static str,
     noun: &'static str,
     names: Signal<Vec<String>>,
@@ -1333,6 +1333,8 @@ fn saved_noun(noun: &str, plural: bool) -> &str {
         ("point set", true) => "puntensets",
         ("point set", false) => "puntenset",
         ("route", true) => "routes",
+        ("drill", true) => "oefeningen",
+        ("drill", false) => "oefening",
         _ => "route",
     }
 }
