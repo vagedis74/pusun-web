@@ -1,19 +1,14 @@
-# Builds the app with Trunk and publishes it to GitHub Pages on every push to main.
+# Builds the app with Trunk and publishes it to GitHub Pages. Kept as a reference for
+# building courses.json: the live site sits behind Cloudflare Access, and Pages cannot
+# require a login, so this only runs when started by hand (and is disabled in Settings).
 # The Pages source must be set to "GitHub Actions" (Settings → Pages).
 name: Deploy to GitHub Pages
 
 on:
-  push:
-    branches: [main]
-  # Weekly rebuild so the saved course list stays current.
-  schedule:
-    - cron: "17 4 * * 1"
   workflow_dispatch:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 # One deployment at a time; a newer push replaces a queued one.
 concurrency:
@@ -28,10 +23,15 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # Build scripts of third-party crates run here, so this job gets no write or OIDC
+    # token permissions; configure-pages only reads the Pages settings.
+    permissions:
+      contents: read
+      pages: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: dtolnay/rust-toolchain@master
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master
         with:
           toolchain: ${{ env.RUST_VERSION }}
           targets: wasm32-unknown-unknown
@@ -45,7 +45,7 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           "$HOME/.local/bin/trunk" --version
 
-      - uses: actions/cache@v6
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry
@@ -72,18 +72,21 @@ jobs:
             echo "::warning::Could not fetch the course list; Courses will show an error on the site"
           fi
 
-      - uses: actions/configure-pages@v6
+      - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
 
-      - uses: actions/upload-pages-artifact@v5
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: dist
 
   deploy:
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - id: deployment
-        uses: actions/deploy-pages@v5
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
