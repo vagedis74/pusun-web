@@ -1540,6 +1540,11 @@ pub fn App() -> impl IntoView {
                 <SavedList title="Saved routes" noun="route" names=route_names can_save=Signal::derive(move || !drill.get().is_empty())
                     on_load=load_route on_delete=delete_route on_save=save_route />
 
+                <p class="ai-drill">
+                    <a class="ai-drill-link" href="/ai/">{move || tr("AI drill by Claude Opus →")}</a>
+                    <span class="hint">{move || tr("A new, very intense drill for singles or doubles. Save it there and it appears in Saved routes.")}</span>
+                </p>
+
                 <h3>{move || tr("AI Coach")}</h3>
                 <p class="hint">{move || tr("Generates a random drill: the first ball goes deep to the chosen side, the rest anywhere. Level low adds 0.5 s between balls, high removes 0.5 s.")}</p>
                 <div class="row">

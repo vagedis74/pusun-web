@@ -89,6 +89,8 @@ pub fn tr(en: &str) -> &str {
         "Start drill" => "Oefening starten",
         "Saved routes" => "Opgeslagen routes",
         "AI Coach" => "AI-coach",
+        "AI drill by Claude Opus →" => "AI-oefening door Claude Opus →",
+        "A new, very intense drill for singles or doubles. Save it there and it appears in Saved routes." => "Een nieuwe, zeer intensieve oefening voor enkel- of dubbelspel. Sla hem daar op en hij verschijnt bij Opgeslagen routes.",
         "First ball" => "Eerste bal",
         "Left" => "Links",
         "Right" => "Rechts",

@@ -91,6 +91,7 @@ Web Bluetooth only works in **Chrome or Edge** (desktop or Android) on `https://
 - Help: every **?** button opens a short explanation that closes by itself after a reading time
   (4–12 s, shown by a shrinking bar), or at once on any tap
 - AI Coach: random drills from first-ball side, level and ball count (2–9)
+- AI drill: a link under Saved routes in Vary Speed opens `/ai/`, where Claude Opus designs a new, very intense drill (see [AI drill generator](#ai-drill-generator-ai)); saved drills appear in Saved routes
 - Courses: Pusun's online training courses with their videos, with names, descriptions and
   video titles translated from Chinese (by pattern, in `src/courses.rs`); "Practice in Vary Speed"
   loads the course's drill, like the app's Start button (works without a machine connected)
