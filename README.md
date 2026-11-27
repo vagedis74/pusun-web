@@ -22,6 +22,9 @@ with neither, the section explains why the list cannot load. Videos and images l
 Live build: https://pusun.kingconfig.com, served from this machine through a Cloudflare
 Tunnel and protected by Cloudflare Access (Zero Trust application `pusun`): only the allowed
 email addresses can log in, with a one-time code or another configured login method.
+A Bypass policy lets requests from the IP of `telefoon.kingconfig.com` (62.45.87.204,
+the home connection) in without a login. Access matches IPs, not hostnames, so update
+that policy if the IP changes.
 `server/install.sh` installs two user services: `pusun-web-origin` runs `server/server.py`
 on `127.0.0.1:8917` (it marks HTML `no-cache` so phones pick up new builds, sends a
 Content-Security-Policy that allows Trunk's inline loader script by its hash, and does not list
@@ -144,6 +147,31 @@ Same frames as tennis, except:
 - Reselecting fixed point or volley while running sends `66` with trailer `66` instead of `67`.
 - In the official app the padel screen only writes to machines named `PT2…`/`PT8…`;
   for `PT7…` machines it sends nothing. pusun-web sends anyway and shows a warning.
+
+## Keeping the Bluetooth link up
+
+Web Bluetooth gives a page no background service, so the app keeps the link up itself
+(`src/app.rs`, `src/ble.rs`):
+
+- **Reconnects by itself.** When the link drops (machine switched off, out of range, phone
+  asleep), the app connects to the same machine again without the device chooser, with pauses
+  of 0.5 s growing to 8 s (30 s while the page is hidden), until it is back or Disconnect or
+  Cancel is pressed. The court table and settings are sent again after every connect.
+- **Commands wait for the link.** A command given while the link is down, or one that fails,
+  is queued and sent once the link is back, if that is within 15 s. Older commands are dropped,
+  so a drill never starts long after it was asked for. Stop clears the queue. A drill that
+  was playing when the link dropped is not restarted: press Start again.
+- **Restarts a stuck link.** A failed write restarts the link and sends the rest after it,
+  up to 3 times in a row; then the error is shown.
+- **Keepalive and watchdog.** Every 15 s the link is checked, and if nothing was sent for
+  15 s a battery query goes out. That keeps the battery reading current and finds a dead link
+  before the next real command. A link that died without a disconnect event is restarted.
+- **Screen stays on** while connected (Screen Wake Lock), so Android does not put the tab
+  and its Bluetooth link to sleep. Coming back to the page re-checks the link and the lock.
+- **Reconnects after a reload** without the chooser where Chrome has
+  `navigator.bluetooth.getDevices()`. On Chrome for Android this may need
+  `chrome://flags/#enable-web-bluetooth-new-permissions-backend` turned on; without it, a
+  reload needs one tap on Connect machine.
 
 ## Verified on hardware
 

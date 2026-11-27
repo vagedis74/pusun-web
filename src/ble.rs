@@ -100,6 +100,7 @@ pub struct Machine {
     pub name: String,
     device: BluetoothDevice,
     write: BluetoothRemoteGattCharacteristic,
+    notify: BluetoothRemoteGattCharacteristic,
     lock: Mutex<()>,
     with_response: Cell<bool>,
     can_write_without_response: bool,
@@ -220,6 +221,7 @@ impl Machine {
             name,
             device,
             write,
+            notify,
             lock: Mutex::new(()),
             with_response: Cell::new(!without),
             can_write_without_response: without,
@@ -284,5 +286,56 @@ impl Machine {
         if let Some(s) = self.device.gatt() {
             s.disconnect();
         }
+    }
+
+    /// The Bluetooth device, to connect to it again without the chooser.
+    pub fn device(&self) -> BluetoothDevice {
+        self.device.clone()
+    }
+
+    /// Whether the browser still has the GATT link. A missed disconnect event (for
+    /// example while the phone slept) leaves a `Machine` whose link is already gone.
+    pub fn is_connected(&self) -> bool {
+        self.device.gatt().is_some_and(|g| g.connected())
+    }
+}
+
+impl Drop for Machine {
+    /// Unhooks the event handlers, so the browser never calls a closure that is gone.
+    fn drop(&mut self) {
+        self.device.set_ongattserverdisconnected(None);
+        self.notify.set_oncharacteristicvaluechanged(None);
+    }
+}
+
+/// Machines this site was allowed to use before, found without the device chooser,
+/// so a reload can connect again on its own. Uses `navigator.bluetooth.getDevices()`;
+/// on a Chrome without it (it may need chrome://flags/#enable-web-bluetooth-new-permissions-backend)
+/// this returns nothing and the chooser is needed once after each reload.
+pub async fn known_devices() -> Vec<BluetoothDevice> {
+    let Some(bt) = web_sys::window().and_then(|w| w.navigator().bluetooth()) else { return Vec::new() };
+    let Ok(f) = js_sys::Reflect::get(&bt, &"getDevices".into()) else { return Vec::new() };
+    let Some(f) = f.dyn_ref::<js_sys::Function>() else { return Vec::new() };
+    let Ok(p) = f.call0(&bt) else { return Vec::new() };
+    let Ok(list) = JsFuture::from(js_sys::Promise::from(p)).await else { return Vec::new() };
+    js_sys::Array::from(&list).iter().map(|d| d.unchecked_into::<BluetoothDevice>()).collect()
+}
+
+/// Asks the browser to keep the screen on, which also keeps Android from putting the
+/// tab (and with it the Bluetooth link) to sleep during a session. The browser drops
+/// the lock whenever the page is hidden, so call this again when it is shown.
+/// Returns the lock to release, or `None` where the Screen Wake Lock API is missing.
+pub async fn keep_screen_on() -> Option<JsValue> {
+    let nav = web_sys::window()?.navigator();
+    let wl = js_sys::Reflect::get(&nav, &"wakeLock".into()).ok().filter(|v| !v.is_undefined())?;
+    let req = js_sys::Reflect::get(&wl, &"request".into()).ok()?.dyn_into::<js_sys::Function>().ok()?;
+    let p = req.call1(&wl, &"screen".into()).ok()?;
+    JsFuture::from(js_sys::Promise::from(p)).await.ok()
+}
+
+/// Releases a lock from [`keep_screen_on`].
+pub fn release_screen(lock: &JsValue) {
+    if let Ok(f) = js_sys::Reflect::get(lock, &"release".into()).and_then(|f| f.dyn_into::<js_sys::Function>().map_err(JsValue::from)) {
+        let _ = f.call0(lock);
     }
 }
