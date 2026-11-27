@@ -984,8 +984,8 @@ pub fn App() -> impl IntoView {
                             <span class="with-help"><button on:click=forget_default title=move || tr("Remove this pattern's saved default")>"✕"</button><Help topic="✕" /></span>
                         </Show>
                     </Show>
-                    <span class="with-help"><button class="primary" on:click=move |_| start() disabled=move || running.get()>{move || tr("Start")}</button><Help topic="Start" /></span>
-                    <span class="with-help"><button class="stop" on:click=move |_| stop()>{move || tr("Stop")}</button><Help topic="Stop" /></span>
+                    <span class="with-help"><button class="primary" on:click=move |_| start() disabled=move || running.get()>{move || tr("Start")}</button></span>
+                    <span class="with-help"><button class="stop" on:click=move |_| stop()>{move || tr("Stop")}</button></span>
                 </div>
                 <Show when=move || notice.get().is_some()>
                     <p class="hint">{move || notice.get().map(|msg| tr(&msg).to_owned())}</p>
@@ -1129,7 +1129,7 @@ pub fn App() -> impl IntoView {
                     </select>
                     <span class="with-help"><button on:click=move |_| drill.update(|d| { d.pop(); })>{move || tr("Undo")}</button><Help topic="Undo" /></span>
                     <span class="with-help"><button on:click=move |_| drill.set(Vec::new())>{move || tr("Clear")}</button><Help topic="Clear" /></span>
-                    <span class="with-help"><button class="primary" on:click=start_drill disabled=move || drill.get().is_empty() || !connected()>{move || tr("Start drill")}</button><Help topic="Start drill" /></span>
+                    <span class="with-help"><button class="primary" on:click=start_drill disabled=move || drill.get().is_empty() || !connected()>{move || tr("Start drill")}</button></span>
                 </div>
 
                 <div class="shots">
@@ -1264,9 +1264,9 @@ pub fn App() -> impl IntoView {
                                         load_library_drill(d);
                                         start_current_drill();
                                         active_drill.set(Some(d.key));
-                                    }>{move || tr("Start")}</button><Help topic="Drill start" /></span>
+                                    }>{move || tr("Start")}</button></span>
                                 <span class="with-help"><button class="stop" disabled=move || !connected()
-                                    on:click=move |_| stop()>{move || tr("Stop")}</button><Help topic="Drill stop" /></span>
+                                    on:click=move |_| stop()>{move || tr("Stop")}</button></span>
                                     <span class="with-help"><button on:click=move |_| {
                                         load_library_drill(d);
                                         show_vary_speed();

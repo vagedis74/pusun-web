@@ -1117,9 +1117,9 @@ mod view {
                 </ol>
                 <div class="row">
                     <span class="with-help"><button class="primary" disabled=move || !connected.get()
-                        on:click=move |_| g.with_value(|g| on_start(g))>{move || tr("Start")}</button><Help topic="Drill start" /></span>
+                        on:click=move |_| g.with_value(|g| on_start(g))>{move || tr("Start")}</button></span>
                     <span class="with-help"><button class="stop" disabled=move || !connected.get()
-                        on:click=move |_| on_stop()>{move || tr("Stop")}</button><Help topic="Drill stop" /></span>
+                        on:click=move |_| on_stop()>{move || tr("Stop")}</button></span>
                     <span class="with-help"><button on:click=move |_| g.with_value(|g| on_edit(g))>{move || tr("Edit")}</button><Help topic="Drill edit" /></span>
                 </div>
             </article>
