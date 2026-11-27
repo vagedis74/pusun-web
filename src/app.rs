@@ -19,7 +19,9 @@ const ROUTES_KEY: &str = "pusun-web.routes";
 const DEFAULTS_KEY: &str = "pusun-web.pattern-defaults";
 const ADVANCED_KEY: &str = "pusun-web.advanced";
 const SPORT_KEY: &str = "pusun-web.sport";
-const DIFFICULTY_KEY: &str = "pusun-web.drill-difficulty";
+/// Renamed when the default became 5, so a level chosen under the old default of 3
+/// does not keep the app below the new default.
+const DIFFICULTY_KEY: &str = "pusun-web.drill-difficulty.v2";
 const PADEL_CUSTOM_KEY: &str = "pusun-web.padel.custom-points";
 
 fn custom_key(sport: Sport) -> &'static str {
@@ -368,7 +370,8 @@ pub fn App() -> impl IntoView {
     let spin = RwSignal::new(0i8);
     let lr = RwSignal::new(1140u16);
     let ud = RwSignal::new(1500u16);
-    let height = RwSignal::new(Height::Mid);
+    // Court height always starts on Low.
+    let height = RwSignal::new(Height::Low);
     let height_level = RwSignal::new(p::HEIGHT_LEVEL_DEFAULT);
 
     let pattern = RwSignal::new(Pattern::Fixed(1));
@@ -564,11 +567,13 @@ pub fn App() -> impl IntoView {
             freq.set(d.freq);
             speed.set(d.speed);
             spin.set(d.spin);
+            // The court height stays as chosen (Low by default); a stored fine height level
+            // is kept for Mid and only sent as a table while Mid is chosen.
             if d.height_level != 0 {
-                height.set(Height::Mid);
                 height_level.set(d.height_level);
             }
-            steps.extend(d.apply_steps(sp));
+            let table = if height.get_untracked() == Height::Mid { d.height_level } else { 0 };
+            steps.extend(PatternDefault { height_level: table, ..d }.apply_steps(sp));
         }
         notice.set(None);
         let reselect = sp == Sport::Padel && running.get_untracked() && matches!(pat, Pattern::Fixed(_) | Pattern::Volley(_));
@@ -658,7 +663,7 @@ pub fn App() -> impl IntoView {
     let pause = RwSignal::new(DrillPause::None);
     let drill_params = RwSignal::new(DrillPoint::defaults());
     let routes = RwSignal::new(load_routes());
-    let ai = RwSignal::new(AiOptions { left: true, level: 1, balls: 3 });
+    let ai = RwSignal::new(AiOptions { left: true, level: 2, balls: 3 });
     let date = move || ctx.name.get_untracked().as_deref().and_then(p::date_code);
 
     let start_current_drill = move || {
@@ -681,7 +686,7 @@ pub fn App() -> impl IntoView {
             .and_then(|s| s.get_item(DIFFICULTY_KEY).ok().flatten())
             .and_then(|v| v.parse::<u8>().ok())
             .filter(|v| (1..=5).contains(v))
-            .unwrap_or(drills::NORMAL),
+            .unwrap_or(5),
     );
     let set_difficulty = move |level: u8| {
         difficulty.set(level);
