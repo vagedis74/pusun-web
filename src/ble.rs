@@ -48,6 +48,10 @@ const WRITE_TIMEOUT_MS: u32 = 3_000;
 /// starting with short waits.
 const BUSY_WAIT_MS: u32 = 5_000;
 const BUSY_STEP_MS: u32 = 25;
+/// Least time between two writes. Writes without response are only queued by the
+/// phone, so two tasks writing at once could overrun its small queue and lose a frame
+/// without any error. The app's own gaps are 10 ms or more, so this changes no timing.
+const MIN_WRITE_GAP_MS: f64 = 10.0;
 
 /// Chrome's error when a characteristic is asked to start an operation while
 /// the previous one has not finished ("GATT operation already in progress.").
@@ -98,6 +102,10 @@ async fn with_timeout<T>(p: impl std::future::IntoFuture<Output = Result<T, JsVa
 
 pub struct Machine {
     pub name: String,
+    /// Whether the machine's notifications are on. Only then can the app tell from its
+    /// replies that it still hears commands.
+    pub notifications: bool,
+    last_write: Cell<f64>,
     device: BluetoothDevice,
     write: BluetoothRemoteGattCharacteristic,
     notify: BluetoothRemoteGattCharacteristic,
@@ -189,16 +197,16 @@ impl Machine {
         // subscription. Commands do not depend on it (only battery and fault reports do),
         // so stop waiting after a few seconds and keep the connection.
         let started = JsFuture::from(notify.start_notifications()).map(|r| match r {
-            Ok(_) => "Notifications on".to_string(),
-            Err(e) => format!("Notifications failed: {}; battery and fault reports unavailable", js_err(e)),
+            Ok(_) => (true, "Notifications on".to_string()),
+            Err(e) => (false, format!("Notifications failed: {}; battery and fault reports unavailable", js_err(e))),
         });
         let timeout = TimeoutFuture::new(NOTIFY_TIMEOUT_MS).map(|_| {
-            format!(
+            (false, format!(
                 "No reply when starting notifications after {} s; continuing without battery and fault reports",
                 NOTIFY_TIMEOUT_MS / 1000
-            )
+            ))
         });
-        let line = futures::select! {
+        let (notifications, line) = futures::select! {
             l = started.fuse() => l,
             l = timeout.fuse() => l,
         };
@@ -219,6 +227,8 @@ impl Machine {
 
         Ok(Rc::new(Machine {
             name,
+            notifications,
+            last_write: Cell::new(0.0),
             device,
             write,
             notify,
@@ -233,6 +243,16 @@ impl Machine {
     /// Writes one frame. Writes are serialized; GATT rejects overlapping operations.
     pub async fn send(&self, f: &Frame) -> Result<(), String> {
         let _guard = self.lock.lock().await;
+        let gap = js_sys::Date::now() - self.last_write.get();
+        if gap < MIN_WRITE_GAP_MS {
+            TimeoutFuture::new((MIN_WRITE_GAP_MS - gap).ceil() as u32).await;
+        }
+        let r = self.send_locked(f).await;
+        self.last_write.set(js_sys::Date::now());
+        r
+    }
+
+    async fn send_locked(&self, f: &Frame) -> Result<(), String> {
         if self.with_response.get() {
             match self.write_retrying(f, true).await {
                 Ok(()) => return Ok(()),

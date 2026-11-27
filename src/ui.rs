@@ -30,6 +30,7 @@ pub fn tr(en: &str) -> &str {
         "Disconnect" => "Verbinding verbreken",
         "Reconnecting…" => "Opnieuw verbinden…",
         "Cancel" => "Annuleren",
+        "Bluetooth is off on this phone. Turn it on; the app reconnects by itself." => "Bluetooth staat uit op deze telefoon. Zet het aan; de app verbindt dan vanzelf opnieuw.",
         "The connection dropped while the machine was playing. Press Start again once it is back." => "De verbinding viel weg terwijl de machine speelde. Druk opnieuw op Start zodra ze terug is.",
         "Reboot" => "Herstart",
         "Quick Drill" => "Snelle oefening",

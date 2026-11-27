@@ -25,8 +25,28 @@ const DIFFICULTY_KEY: &str = "pusun-web.drill-difficulty.v2";
 const PADEL_CUSTOM_KEY: &str = "pusun-web.padel.custom-points";
 /// Bluetooth id of the machine used last, to find it again after a reload.
 const DEVICE_KEY: &str = "pusun-web.device-id";
-/// How often the link is checked, and how long it may stay idle before a keepalive.
+/// How long the link may stay idle before a keepalive.
 const KEEPALIVE_MS: u32 = 15_000;
+/// How often the watchdog looks at the link. While the machine is not answering it
+/// probes at this pace, so a dead link is restarted within about 15–20 s.
+const WATCHDOG_MS: u32 = 5_000;
+/// Unanswered keepalives in a row after which the link counts as dead.
+const MAX_MISSED: u32 = 3;
+
+/// Sleeps `ms`, or less when `poke` is set (which it clears). Returns whether poked.
+async fn nap(poke: StoredValue<bool>, ms: u32) -> bool {
+    let mut left = ms;
+    while left > 0 {
+        if poke.get_value() {
+            poke.set_value(false);
+            return true;
+        }
+        let step = left.min(250);
+        TimeoutFuture::new(step).await;
+        left -= step;
+    }
+    false
+}
 
 fn custom_key(sport: Sport) -> &'static str {
     match sport {
@@ -270,6 +290,8 @@ struct Ctx {
     last_tx: StoredValue<f64>,
     /// Link restarts after failed writes since the last write that worked.
     failures: StoredValue<u32>,
+    /// When the machine last sent anything (a notification).
+    last_rx: StoredValue<f64>,
 }
 
 /// After this many restarts in a row without one good write, a failing command is
@@ -282,6 +304,8 @@ const PENDING_MAX_AGE_MS: f64 = 15_000.0;
 
 impl Ctx {
     fn push_log(&self, line: String) {
+        let d = js_sys::Date::new_0();
+        let line = format!("{:02}:{:02}:{:02} {line}", d.get_hours(), d.get_minutes(), d.get_seconds());
         self.log.update(|l| {
             l.push(line);
             let n = l.len();
@@ -419,6 +443,7 @@ pub fn App() -> impl IntoView {
         recover: StoredValue::new_local(None),
         last_tx: StoredValue::new(0.0),
         failures: StoredValue::new(0),
+        last_rx: StoredValue::new(0.0),
     };
     let battery = RwSignal::new(None::<u8>);
     let fault = RwSignal::new(None::<String>);
@@ -469,10 +494,17 @@ pub fn App() -> impl IntoView {
     let advanced = RwSignal::new(storage().and_then(|s| s.get_item(ADVANCED_KEY).ok().flatten()).as_deref() == Some("1"));
     let status = RwSignal::new(None::<(u8, u8)>);
 
+    // Whether the machine answered a battery query on this link: only then does a
+    // missing answer mean the link is dead (see the watchdog below).
+    let answers = StoredValue::new(false);
     let on_notify = move |bytes: Vec<u8>| {
+        ctx.last_rx.set_value(js_sys::Date::now());
         ctx.push_log(format!("RX {}", p::hex(&bytes)));
         match p::parse_notification(&bytes) {
-            Notification::Battery(v) => battery.set(Some(v)),
+            Notification::Battery(v) => {
+                answers.set_value(true);
+                battery.set(Some(v));
+            }
             Notification::Fault(f) => {
                 if f == p::Fault::OutOfBalls {
                     running.set(false);
@@ -516,6 +548,14 @@ pub fn App() -> impl IntoView {
     let reconnecting = RwSignal::new(false);
     let wake = StoredValue::new_local(None::<wasm_bindgen::JsValue>);
     let reconnect_hook = StoredValue::new_local(None::<Rc<dyn Fn()>>);
+    // Set to cut a reconnect pause short: the page was shown again or Bluetooth came back.
+    let poke = StoredValue::new(false);
+    // Whether the phone's Bluetooth is off (from navigator.bluetooth.getAvailability).
+    let bt_off = RwSignal::new(false);
+    // Watchdog state for this link: when the last keepalive went out still unanswered,
+    // and how many keepalives in a row got no answer.
+    let probe = StoredValue::new(None::<f64>);
+    let missed = StoredValue::new(0u32);
     let reconnect = move || {
         if let Some(f) = reconnect_hook.get_value() {
             f();
@@ -578,6 +618,9 @@ pub fn App() -> impl IntoView {
                 }
                 device.set_value(Some(d));
                 ctx.keep.set_value(true);
+                answers.set_value(false);
+                probe.set_value(None);
+                missed.set_value(0);
                 ctx.machine.set_value(Some(m));
                 ctx.name.set(Some(name));
                 let mut steps = setup_steps();
@@ -613,6 +656,11 @@ pub fn App() -> impl IntoView {
             let mut pause = 500;
             let mut tries = 0;
             while ctx.keep.get_value() && ctx.machine.with_value(Option::is_none) {
+                // No use trying while the phone's Bluetooth is off; turning it on pokes.
+                if bt_off.get_untracked() {
+                    nap(poke, 5_000).await;
+                    continue;
+                }
                 tries += 1;
                 ctx.push_log(format!("Reconnecting (round {tries})"));
                 // On success the loop ends, unless the link already dropped again.
@@ -621,8 +669,11 @@ pub fn App() -> impl IntoView {
                 }
                 // Slower while the page is hidden, to spare the phone's battery.
                 let max = if document().hidden() { 30_000 } else { 8_000 };
-                TimeoutFuture::new(pause).await;
-                pause = (pause * 2).min(max);
+                if nap(poke, pause).await {
+                    pause = 500;
+                } else {
+                    pause = (pause * 2).min(max);
+                }
             }
             reconnecting.set(false);
         });
@@ -670,25 +721,75 @@ pub fn App() -> impl IntoView {
     };
 
     // Keepalive and watchdog. While idle, ask for the battery level now and then: that
-    // keeps the link from timing out, keeps the battery shown up to date, and finds a
-    // dead link (the write fails and the link restarts) before the next real command.
+    // keeps the link (and perhaps the machine) awake and the battery shown up to date.
+    // Commands are written without response, so a write "succeeds" even when the
+    // machine no longer hears anything. The answer to the battery query is what proves
+    // the link works: once the machine has answered on this link, several unanswered
+    // queries in a row restart the link.
     {
         let handle = set_interval_with_handle(
             move || {
                 let Some(m) = ctx.machine.get_value() else { return };
                 if !m.is_connected() {
                     restart_link("the link was gone without a disconnect event");
-                } else if js_sys::Date::now() - ctx.last_tx.get_value() > KEEPALIVE_MS as f64 {
+                    return;
+                }
+                let now = js_sys::Date::now();
+                if let Some(sent) = probe.get_value().filter(|t| now - t >= 3_000.0) {
+                    if ctx.last_rx.get_value() >= sent {
+                        missed.set_value(0);
+                    } else if m.notifications && answers.get_value() {
+                        let n = missed.get_value() + 1;
+                        missed.set_value(n);
+                        ctx.push_log(format!("No answer from the machine ({n}/{MAX_MISSED})"));
+                        if n >= MAX_MISSED {
+                            restart_link("the machine stopped answering");
+                            return;
+                        }
+                    }
+                    probe.set_value(None);
+                }
+                // Probe when idle, and also while unanswered, to settle it quickly.
+                if probe.get_value().is_none() && (now - ctx.last_tx.get_value() > KEEPALIVE_MS as f64 || missed.get_value() > 0) {
+                    probe.set_value(Some(now));
                     ctx.run_logged(vec![(0, p::battery_query())], false);
                 }
             },
-            std::time::Duration::from_millis(KEEPALIVE_MS as u64),
+            std::time::Duration::from_millis(WATCHDOG_MS as u64),
         );
         on_cleanup(move || {
             if let Ok(h) = handle {
                 h.clear();
             }
         });
+    }
+
+    // Follow the phone's Bluetooth switch: say so when it is off, and reconnect at once
+    // when it comes back on instead of waiting out the pause.
+    if let Some(bt) = window().navigator().bluetooth() {
+        let check = {
+            let bt = bt.clone();
+            move || {
+                let p = bt.get_availability();
+                spawn_local(async move {
+                    if let Ok(v) = wasm_bindgen_futures::JsFuture::from(js_sys::Promise::from(wasm_bindgen::JsValue::from(p))).await {
+                        let off = v.as_bool() == Some(false);
+                        if bt_off.get_untracked() != off {
+                            bt_off.set(off);
+                            ctx.push_log(if off { "Bluetooth is off on this phone".into() } else { "Bluetooth is on again".into() });
+                            if !off {
+                                poke.set_value(true);
+                                reconnect();
+                            }
+                        }
+                    }
+                });
+            }
+        };
+        check();
+        let on_change = wasm_bindgen::closure::Closure::<dyn FnMut()>::new(check);
+        bt.set_onavailabilitychanged(Some(wasm_bindgen::JsCast::unchecked_ref(on_change.as_ref())));
+        on_change.forget();
     }
 
     // Coming back to the page (screen on, app switched back): the browser dropped the
@@ -701,7 +802,10 @@ pub fn App() -> impl IntoView {
         match ctx.machine.get_value() {
             Some(m) if !m.is_connected() => restart_link("the link was lost while the page was hidden"),
             Some(_) => screen_on(),
-            None => reconnect(),
+            None => {
+                poke.set_value(true);
+                reconnect();
+            }
         }
     });
 
@@ -768,7 +872,11 @@ pub fn App() -> impl IntoView {
         running.set(false);
         // Stop wins over anything still waiting for the link (a drill start, say).
         ctx.pending.set_value((0.0, Vec::new()));
-        ctx.run(p::stop_sequence());
+        // Stop is sent twice: a write without response that the phone drops gives no
+        // error, and a lost Stop leaves the machine firing. A second stop does nothing.
+        let mut steps = p::stop_sequence();
+        steps.insert(1, (60, p::stop()));
+        ctx.run(steps);
     };
 
     // Selecting a pattern applies its preset like the app does, then its saved default,
@@ -1213,6 +1321,9 @@ pub fn App() -> impl IntoView {
                 difficulty=difficulty.into() />
         </div>
 
+        <Show when=move || bt_off.get()>
+            <p class="error" role="status">{move || tr("Bluetooth is off on this phone. Turn it on; the app reconnects by itself.")}</p>
+        </Show>
         <Show when=move || ctx.error.get().is_some()>
             <div class="error">{move || ctx.error.get().map(|msg| ui::message(&msg))} " " <span class="with-help"><button on:click=move |_| ctx.error.set(None)>{move || tr("Dismiss")}</button><Help topic="Dismiss" /></span></div>
         </Show>

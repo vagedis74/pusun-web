@@ -163,9 +163,18 @@ Web Bluetooth gives a page no background service, so the app keeps the link up i
   was playing when the link dropped is not restarted: press Start again.
 - **Restarts a stuck link.** A failed write restarts the link and sends the rest after it,
   up to 3 times in a row; then the error is shown.
-- **Keepalive and watchdog.** Every 15 s the link is checked, and if nothing was sent for
-  15 s a battery query goes out. That keeps the battery reading current and finds a dead link
-  before the next real command. A link that died without a disconnect event is restarted.
+- **Keepalive and watchdog.** Every 5 s the link is checked; after 15 s without a command a
+  battery query goes out. Commands are written without response, so a write "succeeds" even
+  when the machine hears nothing: the machine's answer to the battery query is what proves the
+  link works. Once it has answered on a link, 3 unanswered queries in a row (probed every 5 s)
+  restart the link, so a silently dead link is found within about 15–20 s. A link that died
+  without a disconnect event is restarted too.
+- **Stop is sent twice**, 60 ms apart: a dropped write without response gives no error, and a
+  lost Stop would leave the machine firing. Writes are at least 10 ms apart, so two commands
+  at once cannot overrun the phone's write queue.
+- **Follows the phone's Bluetooth switch.** With Bluetooth off the app says so and waits; when
+  it comes back on, or the page is shown again, a waiting reconnect tries at once.
+- **Log lines carry the time** (HH:MM:SS), so a drop can be traced afterwards.
 - **Screen stays on** while connected (Screen Wake Lock), so Android does not put the tab
   and its Bluetooth link to sleep. Coming back to the page re-checks the link and the lock.
 - **Reconnects after a reload** without the chooser where Chrome has
