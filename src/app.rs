@@ -1017,7 +1017,7 @@ pub fn App() -> impl IntoView {
                 <div class="row">
                     <span>{move || tr("Court height")}</span>
                     {[(Height::Low, "Low"), (Height::Mid, "Mid"), (Height::High, "High")].into_iter().map(|(h, l)| view! {
-                        <span class="with-help"><button class="mode" class:selected=move || height.get() == h on:click=move |_| set_height(h)>{move || tr(l)}</button><Help topic={match l { "Low" => "Court Low", "Mid" => "Court Mid", _ => "Court High" }} /></span>
+                        <span class="with-help"><button class="mode" class:selected=move || height.get() == h on:click=move |_| set_height(h)>{move || tr(l)}</button></span>
                     }).collect_view()}
                     <Show when=move || height.get() == Height::Mid>
                         <span class="with-help"><button on:click=move |_| change_level(-1)>"−"</button><Help topic="Height −" /></span>
@@ -1189,7 +1189,7 @@ pub fn App() -> impl IntoView {
                 <div class="row">
                     <span>{move || tr("Level")}</span>
                     {[(0u8, "Low"), (1, "Mid"), (2, "High")].into_iter().map(|(lv, l)| view! {
-                        <span class="with-help"><button class="mode" class:selected=move || ai.get().level == lv on:click=move |_| ai.update(|a| a.level = lv)>{move || tr(l)}</button><Help topic={match l { "Low" => "AI Low", "Mid" => "AI Mid", _ => "AI High" }} /></span>
+                        <span class="with-help"><button class="mode" class:selected=move || ai.get().level == lv on:click=move |_| ai.update(|a| a.level = lv)>{move || tr(l)}</button></span>
                     }).collect_view()}
                 </div>
                 <div class="row">

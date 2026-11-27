@@ -64,8 +64,8 @@ impl Shot {
     }
 }
 
-/// Offensive gives the player more time and a slower ball to attack; defensive less time
-/// and a faster ball to defend against.
+/// Offensive gives the player more time to attack; defensive less time to defend. The
+/// speed part no longer counts: every drill ball goes at [`drills::DRILL_KMH`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
     Offensive,
@@ -816,7 +816,8 @@ mod tests {
         let lines = parse("1. flat deep left", false).unwrap();
         let at = |mode| generate(&lines, false, mode).unwrap().drill().params_at(NORMAL)[0].1;
         let (off, none, def) = (at(Some(Mode::Offensive)), at(None), at(Some(Mode::Defensive)));
-        assert!(off.speed < none.speed && none.speed < def.speed);
+        // Every drill ball goes at the same speed; the mode changes the time between balls.
+        assert!(off.speed == none.speed && none.speed == def.speed && def.speed == drills::DRILL_KMH + 30);
         assert!(off.interval > none.interval && none.interval > def.interval);
         let all = [Shot::Flat, Shot::Drive, Shot::Topspin, Shot::Slice, Shot::Lob, Shot::HighBall, Shot::DropShot, Shot::Volley];
         for shot in all {

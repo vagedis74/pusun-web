@@ -351,7 +351,7 @@ fn ball_path(d: &Drill) -> String {
 }
 
 /// Difficulty 1..=5. Each drill is written at [`NORMAL`]; every step up feeds the
-/// next ball 0.5 s sooner and a little faster, every step down the opposite.
+/// next ball 0.5 s sooner, every step down later. Speed is always [`DRILL_KMH`].
 pub const DIFFICULTIES: [(u8, &str, &str); 5] = [
     (1, "Very easy", "Heel makkelijk"),
     (2, "Easy", "Makkelijk"),
@@ -362,8 +362,9 @@ pub const DIFFICULTIES: [(u8, &str, &str); 5] = [
 pub const NORMAL: u8 = 3;
 /// Interval change per difficulty step, in tenths of a second.
 const INTERVAL_STEP: i16 = 5;
-/// Speed change per difficulty step. Kept small: speed also sets how deep a ball lands.
-const SPEED_STEP: i16 = 3;
+/// Ball speed of every drill ball, as the app shows it (km/h); the machine value is 30 more.
+/// It is the same at every difficulty, so difficulty only changes the gap between balls.
+pub const DRILL_KMH: u8 = 100;
 
 /// A drill. Library drills borrow `'static` data; a generated one borrows from its owner
 /// (see `builder::Generated`).
@@ -408,7 +409,7 @@ impl Drill<'_> {
                 let p = DrillPoint {
                     lr: d.lr,
                     ud: b.height.unwrap_or(d.ud),
-                    speed: (d.speed as i16 + b.speed as i16 + SPEED_STEP * step).max(0) as u8,
+                    speed: DRILL_KMH + 30,
                     interval: (b.interval as i16 - INTERVAL_STEP * step).max(0) as u8,
                     spin: (50 + 5 * b.spin as i16) as u8,
                 };
