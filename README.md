@@ -197,6 +197,18 @@ on Android:
   (`6D`), mode (`6A 08`, trailer `6F`) and apply (`66`, trailer `67`) are accepted, so this
   firmware does not reject those quirk frames for their non-checksum trailers.
 
+Link tests on 2026-11-27 with the same machine (`PT8260830001`), from a Linux PC with
+Python `bleak`, sending only the battery query (`67`):
+
+- GATT has service `FFF0` with `FFF1` (notify) and `FFF2` (write and write without response).
+- Connecting took 2.0–3.3 s, and 3 disconnects and reconnects in a row all worked.
+- The battery query was answered every time (15 of 15) with `BB 03 <level> …`, in
+  77–379 ms. The watchdog's 3 s limit for an answer is therefore ample.
+- The machine has no idle timeout of 10 minutes or less: with no traffic at all, the link
+  stayed up for 10 minutes, and the battery query was still answered in 0.2 s at the end.
+  Drops on the phone therefore come from the phone (screen off, tab asleep, range), not from
+  the machine. Longer idle times were not tested.
+
 ## Not verified on hardware
 
 The rest comes from reading the app's code, not from a captured session.
