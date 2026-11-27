@@ -22,8 +22,9 @@ with neither, the section explains why the list cannot load. Videos and images l
 Live build: https://pusun.kingconfig.com, served from this machine through a Cloudflare
 Tunnel and protected by Cloudflare Access (Zero Trust application `pusun`): only the allowed
 email addresses can log in, with a one-time code or another configured login method.
-A Bypass policy lets requests from the IP of `telefoon.kingconfig.com` (62.45.87.204,
-the home connection) in without a login. Access matches IPs, not hostnames, so update
+A Bypass policy ("Bypass telefoon / telefoon2") lets requests from the IP of
+`telefoon.kingconfig.com` and `telefoon2.kingconfig.com` (both 62.45.87.204, the home
+connection) in without a login. Access matches IPs, not hostnames, so update
 that policy if the IP changes.
 `server/install.sh` installs two user services: `pusun-web-origin` runs `server/server.py`
 on `127.0.0.1:8917` (it marks HTML `no-cache` so phones pick up new builds, sends a
