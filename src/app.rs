@@ -405,7 +405,8 @@ pub fn App() -> impl IntoView {
         steps
     };
 
-    let connect = move |_| {
+    // Connects through the device chooser, or straight to `device` for a reboot.
+    let start = move |device: Option<web_sys::BluetoothDevice>| {
         connecting.set(true);
         ctx.error.set(None);
         spawn_local(async move {
@@ -415,7 +416,7 @@ pub fn App() -> impl IntoView {
                 running.set(false);
                 ctx.push_log("Disconnected".into());
             };
-            match Machine::connect(on_notify, on_disconnect, move |line| ctx.push_log(line)).await {
+            match Machine::connect(device, on_notify, on_disconnect, move |line| ctx.push_log(line)).await {
                 Ok(m) => {
                     let name = m.name.clone();
                     ctx.push_log(format!("Connected to {name}"));
@@ -433,6 +434,9 @@ pub fn App() -> impl IntoView {
                         (150, p::frequency(freq.get_untracked())),
                         (50, p::lr_limits()),
                         (50, p::ud_limits()),
+                        // The aim and spin shown, which may come from a saved default.
+                        (50, p::position(lr.get_untracked(), ud.get_untracked())),
+                        (50, p::spin(spin.get_untracked())),
                         (50, p::apply()),
                         (100, p::battery_query()),
                     ]);
@@ -444,6 +448,25 @@ pub fn App() -> impl IntoView {
                 }
             }
             connecting.set(false);
+        });
+    };
+
+    let connect = move |_| start(None);
+
+    // Restarts the Bluetooth link to the same machine and sends the setup again, for
+    // when commands stop getting through (for example "GATT operation already in progress").
+    let reboot = move |_| {
+        let Some(m) = ctx.machine.get_value() else { return };
+        ctx.push_log("Rebooting the connection".into());
+        let device = m.close_for_reboot();
+        ctx.machine.set_value(None);
+        ctx.name.set(None);
+        running.set(false);
+        connecting.set(true);
+        spawn_local(async move {
+            // Give the browser and the machine a moment to drop the old link.
+            TimeoutFuture::new(1000).await;
+            start(Some(device));
         });
     };
 
@@ -506,8 +529,9 @@ pub fn App() -> impl IntoView {
         ctx.run(p::stop_sequence());
     };
 
-    // Selecting a pattern applies its preset like the app does, and restarts if running.
-    let select = move |pat: Pattern| {
+    // Selecting a pattern applies its preset like the app does, then its saved default,
+    // and restarts if running. Returns the frames, so callers can queue them after others.
+    let select_steps = move |pat: Pattern| -> Vec<Step> {
         pattern.set(pat.clone());
         let sp = sport.get_untracked();
         let pre = pat.preset(sp);
@@ -552,8 +576,12 @@ pub fn App() -> impl IntoView {
         if running.get_untracked() && pat.is_ready() {
             steps.extend(current_pattern().start());
         }
-        ctx.run(steps);
+        steps
     };
+    let select = move |pat: Pattern| ctx.run(select_steps(pat));
+    // Start with pattern 1's preset and saved default, so a reload shows the saved values
+    // (nothing is sent while disconnected; connecting sends them).
+    let _ = select_steps(Pattern::Fixed(1));
 
     let current_default = move || PatternDefault {
         lr: lr.get(),
@@ -826,10 +854,11 @@ pub fn App() -> impl IntoView {
         }
         custom.set(load_custom(s));
         height_level.update(|l| *l = (*l).min(s.height_level_max()));
-        pattern.set(Pattern::Fixed(1));
-        notice.set(None);
+        // Pattern 1 with this sport's saved default; its height level goes into the table.
+        let selected = select_steps(Pattern::Fixed(1));
         steps.extend(table_upload(300));
-        steps.extend([(300, p::speed(s, speed.get_untracked())), (50, p::apply())]);
+        steps.push((300, p::speed(s, speed.get_untracked())));
+        steps.extend(selected);
         ctx.run(steps);
     };
     let padel = move || sport.get() == Sport::Padel;
@@ -837,6 +866,7 @@ pub fn App() -> impl IntoView {
 
     let connected = move || ctx.name.get().is_some();
     let builder_open = RwSignal::new(false);
+    let quick_open = RwSignal::new(false);
     let is_program = move || matches!(pattern.get(), Pattern::Program(_));
     let is_custom = move || matches!(pattern.get(), Pattern::Custom(_));
 
@@ -855,6 +885,9 @@ pub fn App() -> impl IntoView {
                 <span class="with-help"><button class="mode" class:selected=move || !padel() on:click=move |_| switch_sport(Sport::Tennis)>"Tennis"</button><Help topic="Tennis" /></span>
                 <span class="with-help"><button class="mode" class:selected=padel on:click=move |_| switch_sport(Sport::Padel)>"Padel"</button><Help topic="Padel" /></span>
             </div>
+            <span class="with-help"><button class="quick-drill" class:selected=move || quick_open.get()
+                aria-expanded=move || if quick_open.get() { "true" } else { "false" } aria-controls="quick-drill"
+                on:click=move |_| quick_open.update(|open| *open = !*open)>{move || tr("Quick Drill")}</button><Help topic="Quick Drill" /></span>
             <span class="with-help"><button class="mode" class:selected=move || builder_open.get()
                 aria-expanded=move || if builder_open.get() { "true" } else { "false" } aria-controls="drill-builder"
                 on:click=move |_| builder_open.update(|open| *open = !*open)>{move || tr("Drill Builder")}</button><Help topic="Drill Builder" /></span>
@@ -874,9 +907,41 @@ pub fn App() -> impl IntoView {
                     }}
                 </span>
                 <span class="with-help"><button on:click=move |_| ctx.run(vec![(0, p::battery_query())])>"↻"</button><Help topic="↻" /></span>
+                <span class="with-help"><button on:click=reboot>{move || tr("Reboot")}</button><Help topic="Reboot" /></span>
                 <span class="with-help"><button on:click=disconnect>{move || tr("Disconnect")}</button><Help topic="Disconnect" /></span>
             </Show>
         </header>
+
+        // One tap starts a library drill at the chosen difficulty and closes the menu.
+        <Show when=move || quick_open.get()>
+            <nav id="quick-drill" aria-label="Quick Drill">
+                <Show when=move || !connected()>
+                    <p class="hint">{move || tr("Connect the machine to start a drill.")}</p>
+                </Show>
+                {[(false, "Singles"), (true, "Doubles")].into_iter().map(|(doubles, heading)| view! {
+                    <h3>{move || tr(heading)}</h3>
+                    <div class="quick-list">
+                        {LIBRARY.iter().filter(move |d| d.doubles == doubles).map(|d| view! {
+                            <button class="quick-item" disabled=move || !connected()
+                                class:playing=move || running.get() && active_drill.get() == Some(d.key)
+                                on:click=move |_| {
+                                    load_library_drill(d);
+                                    start_current_drill();
+                                    active_drill.set(Some(d.key));
+                                    quick_open.set(false);
+                                }>
+                                <strong>{move || if ui::dutch() { d.name.1 } else { d.name.0 }}</strong>
+                                <small>{move || { let (en, nl) = d.level.label(); if ui::dutch() { nl } else { en } }}</small>
+                            </button>
+                        }).collect_view()}
+                    </div>
+                }).collect_view()}
+                <div class="row">
+                    <button class="stop" disabled=move || !connected() on:click=move |_| stop()>{move || tr("Stop")}</button>
+                    <button on:click=move |_| quick_open.set(false)>{move || tr("Close")}</button>
+                </div>
+            </nav>
+        </Show>
 
         // Outside <main>, so it can be used before a machine is connected. Hidden rather
         // than removed when closed, so the text and choices survive closing the panel.

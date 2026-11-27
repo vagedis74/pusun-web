@@ -44,6 +44,16 @@ const NOTIFY_TIMEOUT_MS: u32 = 4_000;
 /// A write that has not settled by then is reported as failed instead of blocking
 /// every later write (they are serialized).
 const WRITE_TIMEOUT_MS: u32 = 3_000;
+/// How long a write keeps retrying while another GATT operation is in progress,
+/// starting with short waits.
+const BUSY_WAIT_MS: u32 = 5_000;
+const BUSY_STEP_MS: u32 = 25;
+
+/// Chrome's error when a characteristic is asked to start an operation while
+/// the previous one has not finished ("GATT operation already in progress.").
+fn is_busy(e: &str) -> bool {
+    e.contains("already in progress")
+}
 
 /// Connects GATT and looks up the write and notify characteristics.
 async fn open_gatt(
@@ -98,27 +108,34 @@ pub struct Machine {
 }
 
 impl Machine {
-    /// Shows the browser's device picker and connects to the chosen machine.
+    /// Connects to a machine: to `device` when given (a reboot of the link to the same
+    /// machine), otherwise to the one picked in the browser's device chooser.
     /// `log` receives each step, so a failure on the phone shows where it stopped.
     pub async fn connect(
+        device: Option<BluetoothDevice>,
         on_notify: impl Fn(Vec<u8>) + 'static,
         on_disconnect: impl Fn() + 'static,
         log: impl Fn(String),
     ) -> Result<Rc<Machine>, String> {
-        let bluetooth = web_sys::window()
-            .and_then(|w| w.navigator().bluetooth())
-            .ok_or("This browser has no Web Bluetooth. Use Chrome or Edge on desktop or Android.")?;
+        let device = match device {
+            Some(d) => d,
+            None => {
+                let bluetooth = web_sys::window()
+                    .and_then(|w| w.navigator().bluetooth())
+                    .ok_or("This browser has no Web Bluetooth. Use Chrome or Edge on desktop or Android.")?;
 
-        let filter = BluetoothLeScanFilterInit::new();
-        filter.set_name_prefix("PT");
-        let options = RequestDeviceOptions::new();
-        options.set_filters(&[filter]);
-        let services: Vec<JsString> =
-            [0xFFF0, 0xFFE0, 0xFFE5].iter().map(|s| JsString::from(uuid16(*s))).collect();
-        options.set_optional_services(&services);
+                let filter = BluetoothLeScanFilterInit::new();
+                filter.set_name_prefix("PT");
+                let options = RequestDeviceOptions::new();
+                options.set_filters(&[filter]);
+                let services: Vec<JsString> =
+                    [0xFFF0, 0xFFE0, 0xFFE5].iter().map(|s| JsString::from(uuid16(*s))).collect();
+                options.set_optional_services(&services);
 
-        log("Opening device chooser".into());
-        let device: BluetoothDevice = bluetooth.request_device(&options).await.map_err(js_err)?;
+                log("Opening device chooser".into());
+                bluetooth.request_device(&options).await.map_err(js_err)?
+            }
+        };
         let name = device.name().unwrap_or_default();
         let uuids = if protocol::uses_alt_services(&name) { ALT } else { MAIN };
         log(format!(
@@ -215,23 +232,52 @@ impl Machine {
     pub async fn send(&self, f: &Frame) -> Result<(), String> {
         let _guard = self.lock.lock().await;
         if self.with_response.get() {
-            let result = match self.write.write_value_with_response_with_u8_slice(f) {
-                Ok(p) => with_timeout(p).await,
-                Err(e) => Err(js_err(e)),
-            };
-            match result {
+            match self.write_retrying(f, true).await {
                 Ok(()) => return Ok(()),
                 Err(e) if self.can_write_without_response => {
                     // Retry this frame without response and keep using that from now on.
                     self.with_response.set(false);
-                    let p = self.write.write_value_without_response_with_u8_slice(f).map_err(js_err)?;
-                    return with_timeout(p).await.map_err(|e2| format!("{e}; without response: {e2}"));
+                    return self.write_retrying(f, false).await.map_err(|e2| format!("{e}; without response: {e2}"));
                 }
                 Err(e) => return Err(e),
             }
         }
-        let p = self.write.write_value_without_response_with_u8_slice(f).map_err(js_err)?;
-        with_timeout(p).await
+        self.write_retrying(f, false).await
+    }
+
+    /// Writes a frame, waiting and trying again while the browser reports that another
+    /// GATT operation is still running. That happens when an earlier operation outlived
+    /// its timeout here (a write, or the notification start on Android) but has not
+    /// settled in the browser yet, or while Android is still busy with the connection.
+    async fn write_retrying(&self, f: &Frame, with_response: bool) -> Result<(), String> {
+        let mut waited = 0;
+        loop {
+            let p = if with_response {
+                self.write.write_value_with_response_with_u8_slice(f)
+            } else {
+                self.write.write_value_without_response_with_u8_slice(f)
+            };
+            let result = match p {
+                Ok(p) => with_timeout(p).await,
+                Err(e) => Err(js_err(e)),
+            };
+            match result {
+                Err(e) if is_busy(&e) && waited < BUSY_WAIT_MS => {
+                    let step = (BUSY_STEP_MS * (1 + waited / 500)).min(250);
+                    TimeoutFuture::new(step).await;
+                    waited += step;
+                }
+                r => return r,
+            }
+        }
+    }
+
+    /// Drops the link for a reboot: without the disconnect handler, so the app does not
+    /// treat it as the machine going away, and hands back the device to connect again.
+    pub fn close_for_reboot(&self) -> BluetoothDevice {
+        self.device.set_ongattserverdisconnected(None);
+        self.disconnect();
+        self.device.clone()
     }
 
     pub fn disconnect(&self) {

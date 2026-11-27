@@ -137,3 +137,15 @@ main.disabled .help-dialog, .advanced.disabled .help-dialog { pointer-events: au
 .builder-balls li i, .shot strong i { display: inline-grid; place-items: center; width: 1rem; height: 1rem; margin-right: .35rem; font-style: normal; font-size: .65rem; font-weight: 700; color: #fff; vertical-align: -.1rem; }
 .builder-saved h3 { margin: .4rem 0 0; }
 .builder-saved .row { margin-top: .3rem; }
+
+/* Quick Drill: big red button in the header and its one-tap drill menu. */
+button.quick-drill { background: #d32f2f; border-color: #d32f2f; color: #fff; font-size: 1.15rem; font-weight: 700; padding: .7rem 1.3rem; box-shadow: 0 2px 6px #d32f2f66; }
+button.quick-drill:hover { background: #b71c1c; border-color: #b71c1c; }
+button.quick-drill.selected { box-shadow: inset 0 0 0 3px #fff8, 0 2px 6px #d32f2f66; }
+#quick-drill { margin: .8rem 0; padding: .8rem 1rem; border: 2px solid #d32f2f; border-radius: .8rem; }
+#quick-drill h3 { margin: .6rem 0 .4rem; }
+.quick-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr)); gap: .5rem; }
+.quick-item { display: flex; flex-direction: column; align-items: flex-start; gap: .15rem; text-align: left; min-height: 3.2rem; }
+.quick-item small { opacity: .7; }
+.quick-item.playing { border-color: var(--accent); box-shadow: inset 0 0 0 2px var(--accent); }
+#quick-drill .row { margin-top: .8rem; }
