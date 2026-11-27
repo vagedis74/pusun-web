@@ -454,7 +454,7 @@ pub fn App() -> impl IntoView {
     let freq = RwSignal::new(5u8);
     let spin = RwSignal::new(0i8);
     let lr = RwSignal::new(1140u16);
-    let ud = RwSignal::new(1500u16);
+    let ud = RwSignal::new(1000u16);
     // Court height always starts on Low.
     let height = RwSignal::new(Height::Low);
     let height_level = RwSignal::new(p::HEIGHT_LEVEL_DEFAULT);

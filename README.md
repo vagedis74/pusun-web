@@ -140,7 +140,7 @@ Same frames as tennis, except:
 
 - Speed levels 1–13 map to 66, 76, 80, 83, 87, 91, 95, 100, 105, 115, 125, 135, 145.
 - The mid table is `BasicData21.b3`; low and high tables are the same as tennis.
-- Selection presets (aim, speed): fixed point height 2000, volley 1800, smash (1140, 3600) speed 4,
+- Selection presets (aim, speed): fixed point height 2000 (pusun-web uses 1000 on both screens), volley 1800, smash (1140, 3600) speed 4,
   primary (1140, 2300), moon (1140, 3000), bandeja (1140, 4200) speed 3, bajada (1140, 3800)
   speed 4, serve return (1140, 2000) speed 2. Horizontal and vertical aim at (1320, 2000)
   (tennis: (1320, 900)). Bandeja, bajada and serve return start like fixed point (`6A 01`).

@@ -376,7 +376,8 @@ impl Pattern {
         let moon_spin = (6, frame_raw(0x62, [1, 30, 0, 0, 0, 0], 0x7A));
         let aim = |x: u16, y: u16, speed: u8| Preset { aim: Some((x, y)), speed: Some(speed), ..Preset::default() };
         match self {
-            Pattern::Fixed(v) => aim(side(*v), pick(1200, 2000), 7),
+            // Fixed point starts at height 1000 on both screens (the app uses 1200 for tennis, 2000 for padel).
+            Pattern::Fixed(v) => aim(side(*v), 1000, 7),
             Pattern::Smash => aim(1140, pick(4200, 3600), 4),
             Pattern::Volley(v) => aim(side(*v), pick(1000, 1800), 6),
             // Speed only drops to 1 if above 2.
@@ -899,7 +900,8 @@ mod tests {
 
     #[test]
     fn presets_match_app() {
-        assert_eq!(Pattern::Fixed(3).preset(Sport::Tennis).aim, Some((2070, 1200)));
+        assert_eq!(Pattern::Fixed(3).preset(Sport::Tennis).aim, Some((2070, 1000)));
+        assert_eq!(Pattern::Fixed(1).preset(Sport::Padel).aim.map(|a| a.1), Some(1000));
         assert_eq!(Pattern::Volley(2).preset(Sport::Tennis).aim, Some((210, 1000)));
         assert_eq!(Pattern::Smash.preset(Sport::Tennis).speed, Some(4));
         assert_eq!(Pattern::Moon.preset(Sport::Tennis).spin.unwrap().1, [0xAA, 0x62, 1, 0x1E, 0, 0, 0, 0, 0x7A, 0xA5]);
@@ -1068,7 +1070,7 @@ mod tests {
         assert_eq!(custom_point(1, c[0]), mid[35]);
 
         let pre = |p: Pattern| p.preset(Sport::Padel);
-        assert_eq!(pre(Pattern::Fixed(2)).aim, Some((210, 2000)));
+        assert_eq!(pre(Pattern::Fixed(2)).aim, Some((210, 1000)));
         assert_eq!(pre(Pattern::Volley(3)).aim, Some((2070, 1800)));
         assert_eq!((pre(Pattern::Smash).aim, pre(Pattern::Smash).speed), (Some((1140, 3600)), Some(4)));
         assert_eq!(pre(Pattern::Primary).aim, Some((1140, 2300)));
