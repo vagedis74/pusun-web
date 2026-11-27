@@ -105,6 +105,35 @@ Web Bluetooth only works in **Chrome or Edge** (desktop or Android) on `https://
   controls. "Read value" sends `71` and shows the two values of the `30` reply; the point
   editor writes any court point 1–41 with unchecked values, then sends apply
 
+## AI drill generator (`ai/`)
+
+`https://pusun.kingconfig.com/ai/` (behind the same Cloudflare Access login): pick
+**Singles** or **Doubles** and **Forehand**, **Backhand** or **Both**, and Claude Opus 5.5
+designs a new, very intense drill for the PT-9001. A loop is **8 balls** in singles and
+**4 balls per player** (8 in all) in doubles, then it repeats.
+
+- Flask app `ai/app.py` on `127.0.0.1:8918` (user service `pusun-web-ai`); `server/server.py`
+  forwards `/ai/` to it, so it shares the controller's origin.
+- It calls [claude-gateway](https://github.com/vagedis74/claude-gateway) (`127.0.0.1:8787`,
+  token `~/.config/claude-gateway.token`) with model `claude-opus-5-5`. A drill takes about
+  30-40 s. It runs as a background job that the page polls, because Cloudflare cuts off
+  responses that take longer than 100 s.
+- `ai/drill.py` holds the prompt, which describes the 28-point Vary Speed grid and its
+  ranges, and the checks. Every value is snapped and clamped to the machine's ranges
+  (speed 110-140, gaps 2.5-4.0 s), there must be exactly 8 balls (4 per player in doubles),
+  and strokes must match the chosen side. A point used twice must play the same way. One
+  repair round is tried if Claude's answer fails the checks.
+- **Save to Saved routes** writes the drill to the controller's `pusun-web.routes` (same
+  format as `save_routes` in `src/app.rs`). Open the controller → Vary Speed → Saved routes
+  → load → Start. The difficulty setting doesn't apply; it plays as shown.
+- Limits: one generation at a time, at most 3 queued, 20 per hour (`DRILL_MAX_PER_HOUR`).
+  POSTs need a JSON body and a same-origin `Origin`, so other sites can't trigger
+  generations through a logged-in browser.
+- Tests: `cd ai && .venv/bin/python -m pytest -q tests`.
+- The gateway runs on the owner's Claude subscription, which is for personal use. If other
+  people on the Access allow list use this, point `DRILL_GATEWAY_URL` / the token at a
+  Console API key instead (same Messages API).
+
 ## Protocol
 
 Recovered by static analysis of the official Android app v2.3 (`MainActivity7New`);

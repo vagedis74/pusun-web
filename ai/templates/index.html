@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI drill · Pusun</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='ai.css') }}">
+<script type="module" src="{{ url_for('static', filename='ai.js') }}"></script>
+</head>
+<body>
+<header>
+  <h1>AI drill</h1>
+  <a class="back" href="/">← Controller</a>
+</header>
+
+<main>
+  <p class="hint">Claude Opus designs a new, very intense drill for the PT-9001. Pick who
+    it's for and what to train; it takes about a minute.</p>
+
+  <fieldset class="choice" id="format">
+    <legend>Who</legend>
+    <button type="button" data-value="singles" class="selected" aria-pressed="true">Singles</button>
+    <button type="button" data-value="doubles" aria-pressed="false">Doubles</button>
+  </fieldset>
+
+  <fieldset class="choice" id="side">
+    <legend>Train</legend>
+    <button type="button" data-value="forehand" aria-pressed="false">Forehand</button>
+    <button type="button" data-value="backhand" aria-pressed="false">Backhand</button>
+    <button type="button" data-value="both" class="selected" aria-pressed="true">Both</button>
+  </fieldset>
+
+  <div class="run">
+    <button type="button" id="generate" class="primary">Generate drill</button>
+  </div>
+  <p id="status" class="status" role="status" aria-live="polite" hidden></p>
+  <p id="error" class="error" role="alert" hidden></p>
+
+  <article id="result" hidden>
+    <h2 id="d-name"></h2>
+    <p class="tags" id="d-tags"></p>
+    <p id="d-summary"></p>
+    <p class="why"><strong>Why it's hard:</strong> <span id="d-why"></span></p>
+
+    <dl class="stats" id="d-stats"></dl>
+
+    <h3>Court</h3>
+    <p class="hint">Your half, net at the top, as you face it. Numbers are the ball order.</p>
+    <div class="court" id="d-court" aria-label="Where each ball lands"></div>
+    <ul class="players" id="d-players"></ul>
+
+    <h3>Balls</h3>
+    <ol class="balls" id="d-balls"></ol>
+
+    <h3>Coaching</h3>
+    <ul id="d-coaching"></ul>
+    <p class="safety" id="d-safety"></p>
+    <ul class="notes" id="d-notes"></ul>
+
+    <div class="run">
+      <button type="button" id="save" class="primary">Save to Saved routes</button>
+      <button type="button" id="again">Generate another</button>
+    </div>
+    <p id="saved" class="status" role="status" hidden></p>
+  </article>
+</main>
+</body>
+</html>
